@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 import time
+import os
+from pathlib import Path
 from openai import OpenAI
 
 
 def main():
     client = OpenAI(api_key="EMPTY", base_url="http://localhost:8080/v1", timeout=3600)
+
+    script_dir = Path(__file__).parent
+    image_path = script_dir / "test_image.png"
+    image_url = f"file://{image_path.absolute()}"
 
     messages = [
         {
@@ -12,9 +18,7 @@ def main():
             "content": [
                 {
                     "type": "image_url",
-                    "image_url": {
-                        "url": "file:///home/philkir/deepseek-ocr-testing/test_image.png"
-                    },
+                    "image_url": {"url": image_url},
                 },
                 {"type": "text", "text": "Free OCR."},
             ],
