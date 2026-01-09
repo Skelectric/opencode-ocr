@@ -1,44 +1,63 @@
-from vllm import LLM, SamplingParams
-from vllm.model_executor.models.deepseek_ocr import NGramPerReqLogitsProcessor
-from PIL import Image
-import os
+#!/usr/bin/env python3
+import time
+from pathlib import Path
+from openai import OpenAI
 
 
 def main():
-    llm = LLM(
-        model="unsloth/DeepSeek-OCR",
-        enable_prefix_caching=False,
-        mm_processor_cache_gb=0,
-        logits_processors=[NGramPerReqLogitsProcessor],
-        gpu_memory_utilization=0.15,
-    )
+    client = OpenAI(api_key="EMPTY", base_url="http://localhost:8080/v1", timeout=3600)
 
-    image = Image.open("bank-statement-template-09.jpg").convert("RGB")
-    prompt = "<image>\n<|grounding|>Convert the document to markdown."
+    script_dir = Path(__file__).parent
+    image_path = script_dir / "bank-statement-template-09.jpg"
+    image_url = f"file://{image_path.absolute()}"
 
-    model_input = [{"prompt": prompt, "multi_modal_data": {"image": image}}]
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": image_url},
+                },
+                {
+                    "type": "text",
+                    "text": "<|grounding|>Convert the document to markdown.",
+                },
+            ],
+        }
+    ]
 
-    sampling_param = SamplingParams(
+    print("Sending bank statement OCR request to llama-swap...")
+    start = time.time()
+
+    response = client.chat.completions.create(
+        model="deepseek-ocr",
+        messages=messages,
         temperature=0.0,
-        max_tokens=8192,
-        extra_args=dict(
-            ngram_size=30,
-            window_size=90,
-            whitelist_token_ids={128821, 128822},
-        ),
-        skip_special_tokens=False,
+        extra_body={
+            "skip_special_tokens": False,
+            "vllm_xargs": {
+                "ngram_size": 30,
+                "window_size": 90,
+                "whitelist_token_ids": [128821, 128822],
+            },
+        },
     )
 
-    model_outputs = llm.generate(model_input, sampling_param)
+    elapsed = time.time() - start
+    print(f"Response time: {elapsed:.2f}s")
 
-    os.makedirs("output", exist_ok=True)
+    text = response.choices[0].message.content
+    print(f"Generated text:\n{text}")
 
-    for output in model_outputs:
-        text = output.outputs[0].text
-        print(text)
+    output_dir = script_dir / "output"
+    output_dir.mkdir(exist_ok=True)
+    output_file = output_dir / "bank-statement-ocr.md"
 
-        with open("output/bank-statement-ocr.md", "w", encoding="utf-8") as f:
-            f.write(text)
+    with open(output_file, "w", encoding="utf-8") as f:
+        f.write(text)
+
+    print(f"\nOutput saved to: {output_file}")
 
 
 if __name__ == "__main__":
