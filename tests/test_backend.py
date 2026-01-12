@@ -42,7 +42,10 @@ class TestPDFOCRBackend(unittest.TestCase):
         with patch("sys.argv", ["pdf_ocr_backend.py", self.test_pdf, "markdown"]):
             with patch("builtins.print") as mock_print:
                 with patch.object(Path, "exists", return_value=True):
-                    pdf_ocr_backend.main()
+                    with patch.dict(
+                        os.environ, {"DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1"}
+                    ):
+                        pdf_ocr_backend.main()
 
         calls = mock_print.call_args_list
         self.assertTrue(any("Extracted text" in str(call) for call in calls))
@@ -87,9 +90,12 @@ class TestPDFOCRBackend(unittest.TestCase):
 
         with patch("sys.argv", ["pdf_ocr_backend.py", self.test_pdf, "markdown"]):
             with patch.object(Path, "exists", return_value=True):
-                with self.assertRaises(SystemExit) as cm:
-                    pdf_ocr_backend.main()
-                self.assertEqual(cm.exception.code, 1)
+                with patch.dict(
+                    os.environ, {"DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1"}
+                ):
+                    with self.assertRaises(SystemExit) as cm:
+                        pdf_ocr_backend.main()
+                    self.assertEqual(cm.exception.code, 1)
 
     @patch("pdf_ocr_backend.fitz.open")
     @patch("pdf_ocr_backend.OpenAI")
@@ -113,9 +119,31 @@ class TestPDFOCRBackend(unittest.TestCase):
         with patch("sys.argv", ["pdf_ocr_backend.py", self.test_pdf]):
             with patch("builtins.print"):
                 with patch.object(Path, "exists", return_value=True):
-                    pdf_ocr_backend.main()
+                    with patch.dict(
+                        os.environ, {"DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1"}
+                    ):
+                        pdf_ocr_backend.main()
 
         mock_client.chat.completions.create.assert_called_once()
+
+    @patch("builtins.print")
+    @patch("pdf_ocr_backend.fitz.open")
+    def test_main_without_base_url(self, mock_fitz_open, mock_print):
+        mock_doc = MagicMock()
+        mock_doc.page_count = 1
+        mock_fitz_open.return_value = mock_doc
+
+        with patch("sys.argv", ["pdf_ocr_backend.py", self.test_pdf, "markdown"]):
+            with patch.dict(os.environ, {}, clear=True):
+                with patch.object(Path, "exists", return_value=True):
+                    with self.assertRaises(SystemExit) as cm:
+                        pdf_ocr_backend.main()
+                    self.assertEqual(cm.exception.code, 1)
+
+        calls = mock_print.call_args_list
+        self.assertTrue(
+            any("DEEPSEEK_OCR_BASE_URL not set" in str(call) for call in calls)
+        )
 
 
 if __name__ == "__main__":

@@ -12,16 +12,16 @@ Use the provided deployment script for one-command installation and updates:
 
 ```bash
 # Initial installation
-./deploy-tool.sh
+./pdf-ocr/deploy-tool.sh
 
 # Update after making changes to the repository
-./deploy-tool.sh
+./pdf-ocr/deploy-tool.sh
 
 # Force reinstallation (even if already installed)
-./deploy-tool.sh --force
+./pdf-ocr/deploy-tool.sh --force
 
 # Specify custom repository path
-./deploy-tool.sh --repo /path/to/opencode-ocr
+./pdf-ocr/deploy-tool.sh --repo /path/to/opencode-ocr
 ```
 
 The script automatically detects if the tool is already installed and performs an update instead.
@@ -46,8 +46,8 @@ cd ~/.config/opencode/tool && uv sync
 **Important**: Python scripts must be run using `uv run` to ensure proper dependency management:
 
 ```bash
-# Direct backend execution
-uv run --directory ~/.config/opencode/tool pdf_ocr_backend.py <pdf_path> <output_format>
+# Direct backend execution (with .env file)
+uv run --directory ~/.config/opencode/tool --env-file .env pdf_ocr_backend.py <pdf_path> <output_format>
 
 # Via OpenCode agent
 Agent will use the pdf-ocr tool automatically
@@ -66,12 +66,29 @@ Agent will use the pdf-ocr tool automatically
 
 ## Configuration
 
-The tool connects to llama-swap at `http://localhost:8080/v1` using the `deepseek-ocr` model.
+The tool connects to an OpenAI-compatible endpoint running DeepSeek-OCR. The endpoint can be configured in three ways:
 
-For remote systems (miniPC, DESKTOP-V4ETCL4), ensure `llmrig` is resolvable in `/etc/hosts`:
-```
-192.168.104.222 llmrig
-```
+1. **.env file** (recommended for persistent configuration):
+   Copy `.env.example` to `.env` and edit it:
+   ```bash
+   cp .env.example .env
+   # Edit .env with your endpoint URL
+   ```
+   Then run with `uv run --env-file .env`.
+
+2. **Environment variable**:
+   ```bash
+   export DEEPSEEK_OCR_BASE_URL="http://your-endpoint:8080/v1"
+   ```
+
+3. **Command-line argument** (overrides both above):
+   ```bash
+   uv run --directory ~/.config/opencode/tool pdf_ocr_backend.py <pdf_path> <output_format> --base-url http://your-endpoint:8080/v1
+   ```
+
+If none of these are set, the tool will throw an error.
+
+The tool uses the `deepseek-ocr` model name when making requests to the endpoint.
 
 ## Technical Details
 

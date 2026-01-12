@@ -11,3 +11,8 @@ dependencies = [
 [tool.pytest.ini_options]
 testpaths = ["."]
 python_files = ["test_*.py", "*_test.py"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

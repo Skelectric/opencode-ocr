@@ -1,13 +1,30 @@
 #!/usr/bin/env python3
 import sys
+import os
 import fitz
 from openai import OpenAI
 from pathlib import Path
 import base64
+import argparse
 
 
 def main():
-    pdf_path = sys.argv[1]
+    parser = argparse.ArgumentParser(description="Process PDF using DeepSeek-OCR")
+    parser.add_argument("pdf_path", help="Absolute path to PDF file")
+    parser.add_argument(
+        "output_format",
+        nargs="?",
+        default="markdown",
+        choices=["markdown", "text"],
+        help="Output format (default: markdown)",
+    )
+    parser.add_argument(
+        "--base-url",
+        help="OpenAI-compatible endpoint URL (overrides DEEPSEEK_OCR_BASE_URL env var)",
+    )
+    args = parser.parse_args()
+
+    pdf_path = args.pdf_path
 
     if not Path(pdf_path).exists():
         print(f"Error: PDF file not found: {pdf_path}")
@@ -23,9 +40,18 @@ def main():
         print(f"Error: Could not open PDF file: {e}")
         sys.exit(1)
 
-    client = OpenAI(
-        api_key="EMPTY", base_url="http://192.168.104.222:8080/v1", timeout=3600
-    )
+    base_url = args.base_url or os.getenv("DEEPSEEK_OCR_BASE_URL")
+    if not base_url:
+        print("Error: DEEPSEEK_OCR_BASE_URL not set. Set it via:")
+        print(
+            "  1. Environment variable: export DEEPSEEK_OCR_BASE_URL='http://your-endpoint:8080/v1'"
+        )
+        print(
+            "  2. .env file: Add DEEPSEEK_OCR_BASE_URL='http://your-endpoint:8080/v1' to .env"
+        )
+        print("  3. CLI argument: --base-url http://your-endpoint:8080/v1")
+        sys.exit(1)
+    client = OpenAI(api_key="EMPTY", base_url=base_url, timeout=3600)
 
     results = []
 
