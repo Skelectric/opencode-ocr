@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-This plan outlines the creation of a global OpenCode tool for processing PDF files using DeepSeek-OCR. The tool will extract text from PDFs and return markdown or plain text output, deployed across all OpenCode instances (llmrig, miniPC, DESKTOP-V4ETCL4).
+This plan outlines the creation of a global OpenCode tool for processing PDF files using DeepSeek-OCR. The tool converts PDFs to high-quality images, performs OCR on each page, and returns markdown or plain text output, deployed across all OpenCode instances (llmrig, miniPC, DESKTOP-V4ETCL4).
 
 ## Design Decisions
 
@@ -13,6 +13,7 @@ Based on requirements analysis:
 4. **Error Handling**: Fail-fast on any errors
 5. **Progress Reporting**: Wait until complete before returning results
 6. **Tool Description Injection**: Self-contained in tool definition (no AGENTS.md modifications needed)
+7. **PDF Conversion**: PDF-to-image conversion using PyMuPDF at 144 DPI before OCR processing
 
 ---
 
@@ -51,12 +52,25 @@ export default tool({
 ### 1.3 Python Backend Implementation (`pdf_ocr_backend.py`)
 
 **Key Features**:
-- PDF to image conversion using PyMuPDF (fitz)
+- PDF to image conversion using PyMuPDF (fitz) at 144 DPI
 - OCR processing via OpenAI client to llama-swap endpoint
 - Full PDF processing (all pages)
+- Sequential page processing to manage memory
+- Temporary image cleanup after OCR
 - Fail-fast error handling
 - Markdown or plain text output
 - No progress reporting (waits until complete)
+
+**PDF Conversion Workflow**:
+1. Open PDF document using PyMuPDF (fitz)
+2. For each page:
+   - Convert page to PNG image at 144 DPI (high quality)
+   - Ensure RGB color space (required by DeepSeek-OCR model)
+   - Save image to temporary file or memory buffer
+   - Send image to DeepSeek-OCR for text extraction
+   - Append OCR result to output with page markers
+   - Clean up temporary image data
+3. Return combined output from all pages
 
 **Dependencies** (managed via `pyproject.toml`):
 - `openai` (OpenAI API client)
@@ -114,9 +128,15 @@ uv run --directory ~/opencode-ocr/pdf-ocr pdf_ocr_backend.py <pdf_path> <output_
 
 **Processing Flow**:
 1. Validate PDF file exists and is readable
-2. Convert PDF pages to images (144 DPI for quality)
-3. Process each page with DeepSeek-OCR
-4. Combine results with markdown formatting
+2. Open PDF document using PyMuPDF
+3. For each page in PDF:
+   - Convert page to PNG image at 144 DPI (high quality for OCR)
+   - Ensure RGB color space (model requirement)
+   - Encode image as base64 data URL
+   - Send to DeepSeek-OCR with "Free OCR." prompt
+   - Extract and format OCR response
+   - Clean up image data
+4. Combine all page results with page break markers
 5. Return complete output or fail on first error
 
 ### 1.5 Error Handling Strategy
@@ -312,8 +332,10 @@ Agent: Uses pdf-ocr tool with pdf_path and output_format="text"
 ### Image Processing
 
 **DPI**: 144 (high quality for OCR)
-**Format**: PNG (lossless)
+**Format**: PNG (lossless compression)
 **Color Space**: RGB (required by model)
+**Memory Management**: Sequential page processing to avoid OOM
+**Cleanup**: Temporary images deleted after OCR processing
 
 ### Output Format
 
@@ -377,6 +399,8 @@ Agent: Uses pdf-ocr tool with pdf_path and output_format="text"
 #!/usr/bin/env python3
 import sys
 import fitz  # PyMuPDF
+import io
+import base64
 from openai import OpenAI
 from pathlib import Path
 
@@ -403,11 +427,42 @@ def main():
 
         for page_num in range(doc.page_count):
             page = doc[page_num]
-            # Convert to image and process with OCR
-            # ...
+
+            # Convert page to image at 144 DPI
+            pix = page.get_pixmap(dpi=144)
+            img_bytes = pix.tobytes("png")
+
+            # Encode as base64 for API
+            img_base64 = base64.b64encode(img_bytes).decode()
+            image_url = f"data:image/png;base64,{img_base64}"
+
+            # Process with OCR
+            response = client.chat.completions.create(
+                model="deepseek-ocr",
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": image_url}},
+                        {"type": "text", "text": "Free OCR."}
+                    ]
+                }],
+                max_tokens=8192,
+                temperature=0.0,
+                extra_body={
+                    "skip_special_tokens": False,
+                    "vllm_xargs": {
+                        "ngram_size": 30,
+                        "window_size": 90,
+                        "whitelist_token_ids": [128821, 128822]
+                    }
+                }
+            )
+
+            results.append(f"--- Page {page_num + 1} ---\n{response.choices[0].message.content}")
 
         output = "\n\n".join(results)
         print(output)
+        doc.close()
 
     except Exception as e:
         print(f"Error processing PDF: {e}")
