@@ -3,21 +3,21 @@
 ## Phase 1: Create Tool in Repository
 
 ### 1.1 Repository Structure Setup
-- [ ] Create repository directory: `~/opencode-ocr/pdf-ocr/tool/`
-- [ ] Create repository directory: `~/opencode-ocr/pdf-ocr/tool/`
-- [ ] Verify directory structure is correct
+- [x] Create repository directory: `~/opencode-ocr/pdf-ocr/tool/`
+- [x] Create repository directory: `~/opencode-ocr/pdf-ocr/tool/`
+- [x] Verify directory structure is correct
 
 ### 1.2 Create TypeScript Tool Definition
-- [ ] Create `~/opencode-ocr/pdf-ocr/tool/pdf-ocr.ts`
-- [ ] Import tool from @opencode-ai/plugin
-- [ ] Define tool description
-- [ ] Define pdf_path argument as string schema
-- [ ] Define output_format argument as string schema with default "markdown"
-- [ ] Implement execute function using `uv run`
-- [ ] Configure Bun.$ to call Python backend with pdf_path and output_format arguments
-- [ ] Return trimmed result from Python backend
-- [ ] Set execute default output_format to "markdown"
-- [ ] Note: Update path when deploying to `~/.config/opencode/tool/`
+- [x] Create `~/opencode-ocr/pdf-ocr/tool/pdf-ocr.ts`
+- [x] Import tool from @opencode-ai/plugin
+- [x] Define tool description
+- [x] Define pdf_path argument as string schema
+- [x] Define output_format argument as string schema with default "markdown"
+- [x] Implement execute function using `uv run`
+- [x] Configure Bun.$ to call Python backend with pdf_path and output_format arguments
+- [x] Return trimmed result from Python backend
+- [x] Set execute default output_format to "markdown"
+- [x] Note: Update path when deploying to `~/.config/opencode/tool/`
 
 ### 1.3 Create Python Backend Script
 - [ ] Create `~/opencode-ocr/pdf-ocr/tool/pdf_ocr_backend.py`
