@@ -1,3 +1,5 @@
+from transformers import AutoTokenizer
+
 # TODO: change modes
 # Tiny: base_size = 512, image_size = 512, crop_mode = False
 # Small: base_size = 640, image_size = 640, crop_mode = False
@@ -36,7 +38,5 @@ PROMPT = "<image>\n<|grounding|>Convert the document to markdown."
 # '先天下之忧而忧'
 # .......
 
-
-from transformers import AutoTokenizer
 
 TOKENIZER = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=True)

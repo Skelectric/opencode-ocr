@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import time
-import os
 from pathlib import Path
 from openai import OpenAI
 

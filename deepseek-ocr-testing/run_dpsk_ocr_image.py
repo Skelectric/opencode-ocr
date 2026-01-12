@@ -38,7 +38,7 @@ def load_image(image_path):
         print(f"error: {e}")
         try:
             return Image.open(image_path)
-        except:
+        except Exception:
             return None
 
 
@@ -141,9 +141,9 @@ def draw_bounding_boxes(image, refs):
                         )
 
                         draw.text((text_x, text_y), label_type, font=font, fill=color)
-                    except:
+                    except Exception:
                         pass
-        except:
+        except Exception:
             continue
     img_draw.paste(overlay, (0, 0), overlay)
     return img_draw
@@ -190,7 +190,7 @@ async def stream_generate(image=None, prompt=""):
     elif prompt:
         request = {"prompt": prompt}
     else:
-        assert False, f"prompt is none!!!"
+        assert False, "prompt is none!!!"
     async for request_output in engine.generate(request, sampling_params, request_id):
         if request_output.outputs:
             full_text = request_output.outputs[0].text
@@ -238,7 +238,7 @@ if __name__ == "__main__":
 
         for idx, a_match_image in enumerate(tqdm(matches_images, desc="image")):
             outputs = outputs.replace(
-                a_match_image, f"![](images/" + str(idx) + ".jpg)\n"
+                a_match_image, "![](images/" + str(idx) + ".jpg)\n"
             )
 
         for idx, a_match_other in enumerate(tqdm(mathes_other, desc="other")):
@@ -284,7 +284,7 @@ if __name__ == "__main__":
 
                     ax.scatter(p0[0], p0[1], s=5, color="k")
                     ax.scatter(p1[0], p1[1], s=5, color="k")
-                except:
+                except Exception:
                     pass
 
             for endpoint in endpoints:
@@ -314,7 +314,7 @@ if __name__ == "__main__":
                             linewidth=0.8,
                         )
                         ax.add_patch(circle)
-            except:
+            except Exception:
                 pass
 
             plt.savefig(f"{OUTPUT_PATH}/geo.jpg")

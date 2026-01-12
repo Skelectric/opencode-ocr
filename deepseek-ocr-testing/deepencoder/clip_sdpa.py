@@ -1,12 +1,14 @@
-from contextlib import nullcontext
 import math
-from typing import Optional, Tuple
+import logging
+
 # from megatron.model import LayerNorm
 from easydict import EasyDict as adict
 import torch
 from torch.nn import functional as F
 from torch import nn
-from flash_attn import flash_attn_qkvpacked_func, flash_attn_func
+from flash_attn import flash_attn_qkvpacked_func
+
+logger = logging.getLogger(__name__)
 # from optimus import flash_attn_func
 # from megatron.core import tensor_parallel
 # from megatron.core import parallel_state as mpu
@@ -73,20 +75,21 @@ def get_abs_pos(abs_pos, tgt_size):
     abs_pos_new = abs_pos.squeeze(0)
     cls_token, old_pos_embed = abs_pos_new[:1], abs_pos_new[1:]
 
-
-
     src_size = int(math.sqrt(abs_pos_new.shape[0] - 1))
     tgt_size = int(math.sqrt(tgt_size))
     dtype = abs_pos.dtype
 
     if src_size != tgt_size:
-        old_pos_embed = old_pos_embed.view(1, src_size, src_size, dim).permute(0, 3, 1,
-                                                                                    2).contiguous()
+        old_pos_embed = (
+            old_pos_embed.view(1, src_size, src_size, dim)
+            .permute(0, 3, 1, 2)
+            .contiguous()
+        )
         old_pos_embed = old_pos_embed.to(torch.float32)
         new_pos_embed = F.interpolate(
             old_pos_embed,
             size=(tgt_size, tgt_size),
-            mode='bicubic',
+            mode="bicubic",
             antialias=True,
             align_corners=False,
         ).to(dtype)
@@ -98,10 +101,10 @@ def get_abs_pos(abs_pos, tgt_size):
     else:
         return abs_pos
 
+
 @torch.jit.script
 def quick_gelu(x):
     return x * torch.sigmoid(1.702 * x)
-
 
 
 class CLIPVisionEmbeddings(nn.Module):
@@ -134,34 +137,34 @@ class CLIPVisionEmbeddings(nn.Module):
         #     pixel_values
         # )  # shape = [*, width, grid, grid]
 
-
         if patch_embeds is not None:
             patch_embeds = patch_embeds
             # print(patch_embeds.shape)
         else:
-            patch_embeds = self.patch_embedding(pixel_values)  
+            patch_embeds = self.patch_embedding(pixel_values)
             # print(111111)
         # shape = [*, width, grid, grid]
         # patch_embeds = patch_embeds.flatten(2).transpose(1, 2)
 
         patch_embeds = patch_embeds.flatten(2).transpose(1, 2)
 
-
         class_embeds = self.class_embedding.expand(batch_size, 1, -1)
         embeddings = torch.cat([class_embeds, patch_embeds], dim=1)
 
         # x = torch.cat([cls_token, x], dim=1)
-        embeddings = embeddings + get_abs_pos(self.position_embedding(self.position_ids), embeddings.size(1))
+        embeddings = embeddings + get_abs_pos(
+            self.position_embedding(self.position_ids), embeddings.size(1)
+        )
         # embeddings = embeddings + self.position_embedding(self.position_ids)
         return embeddings
 
 
 class NoTPFeedForward(nn.Module):
     def __init__(
-            self,
-            cfg,
-            dim: int,
-            hidden_dim: int,
+        self,
+        cfg,
+        dim: int,
+        hidden_dim: int,
     ):
         super().__init__()
 
@@ -241,8 +244,8 @@ class NoTPAttention(torch.nn.Module):
         self.attn_drop = cfg.attention_dropout
 
     def forward(
-            self,
-            x: torch.Tensor,
+        self,
+        x: torch.Tensor,
     ):
         bsz, seqlen, _ = x.shape
         xqkv = self.qkv_proj(x)
@@ -264,7 +267,7 @@ class NoTPAttention(torch.nn.Module):
             # # with torch.backends.cuda.sdp_kernel(enable_flash=True, enable_math=False, enable_mem_efficient=False):
             # output = torch.nn.functional.scaled_dot_product_attention(xq, xk, xv, attn_mask=None)
             # output = output.permute(0, 2, 1, 3).reshape(bsz, seqlen, -1)
-                # output = output.permute(0, 2, 1, 3).contiguous().view(bsz, seqlen, -1)
+            # output = output.permute(0, 2, 1, 3).contiguous().view(bsz, seqlen, -1)
         else:
             # output = flash_attn_qkvpacked_func(xqkv)
             xq, xk, xv = torch.split(xqkv, 1, dim=2)
@@ -278,10 +281,13 @@ class NoTPAttention(torch.nn.Module):
             xk = xk.permute(0, 2, 1, 3)
             xv = xv.permute(0, 2, 1, 3)
             # with torch.backends.cuda.sdp_kernel(enable_flash=True, enable_math=False, enable_mem_efficient=False):
-            output = torch.nn.functional.scaled_dot_product_attention(xq, xk, xv, attn_mask=None)
+            output = torch.nn.functional.scaled_dot_product_attention(
+                xq, xk, xv, attn_mask=None
+            )
             output = output.permute(0, 2, 1, 3).reshape(bsz, seqlen, -1)
         output = self.out_proj(output)
         return output
+
 
 class NoTPTransformerBlock(nn.Module):
     def __init__(self, cfg, layer_id: int, multiple_of=256):
@@ -327,10 +333,9 @@ class NoTPTransformer(nn.Module):
             )
 
     def forward(
-            self,
-            hidden_states,
+        self,
+        hidden_states,
     ):
-
         for lid, layer in enumerate(self.layers):
             # if lid in self.recompute_list:
             #     def custom(layer_id):
@@ -356,16 +361,16 @@ class NoTPTransformer(nn.Module):
 
 # from megatron.core.tensor_parallel.layers import non_tensor_paralleled, local_dp_reduce, local_dp_scatter
 
+
 class VitModel(nn.Module):
-    def __init__(
-            self,
-            cfg,
-            freeze_embed=False,
-            freeze_pre_norm=False
-    ) -> None:
+    def __init__(self, cfg, freeze_embed=False, freeze_pre_norm=False) -> None:
         super().__init__()
 
-        self.embeddings = CLIPVisionEmbeddings(hidden_size=cfg.hidden_size, image_size=cfg.image_size, patch_size=cfg.patch_size)
+        self.embeddings = CLIPVisionEmbeddings(
+            hidden_size=cfg.hidden_size,
+            image_size=cfg.image_size,
+            patch_size=cfg.patch_size,
+        )
 
         if freeze_embed:
             for name, param in self.embeddings.named_parameters():
@@ -408,11 +413,7 @@ class VitModel(nn.Module):
     def __str__(self) -> str:
         return "open_clip"
 
-    def forward(
-            self,
-            x,
-            patch_embeds
-    ):
+    def forward(self, x, patch_embeds):
         x = self.embeddings(x, patch_embeds)
         hidden_states = self.pre_layrnorm(x)
 
@@ -427,22 +428,23 @@ class VitModel(nn.Module):
 vit_model_cfg = adict(
     num_layers=24,
     hidden_size=1024,
-    num_heads = 16,
+    num_heads=16,
     num_attention_heads=16,
     ffn_hidden_size=4096,
     seq_length=256,
     max_position_embeddings=256,
     use_flash_attn=False,
     understand_projector_stride=2,
-    hidden_dropout = 0.0,
-    attention_dropout = 0.0,
-    no_persist_layer_norm = False,
-    layernorm_epsilon = 1e-5,
-    pre_layernorm_epsilon = 1e-5,
-    image_size = 224,
-    patch_size = 14,
-    recompute_list = []
+    hidden_dropout=0.0,
+    attention_dropout=0.0,
+    no_persist_layer_norm=False,
+    layernorm_epsilon=1e-5,
+    pre_layernorm_epsilon=1e-5,
+    image_size=224,
+    patch_size=14,
+    recompute_list=[],
 )
+
 
 def build_clip_l():
     return VitModel(
@@ -452,12 +454,8 @@ def build_clip_l():
     )
 
 
-if __name__ == '__main__':
-
-    
+if __name__ == "__main__":
     from mmgpt.model.vision_encoder.sam_b import build_sam_vit_b
-
-
 
     vit_model_cfg = adict(
         num_layers=24,
@@ -468,18 +466,17 @@ if __name__ == '__main__':
         max_position_embeddings=256,
         use_flash_attn=False,
         understand_projector_stride=2,
-        hidden_dropout = 0.0,
-        attention_dropout = 0.0,
-        no_persist_layer_norm = False,
-        layernorm_epsilon = 1e-5,
-        pre_layernorm_epsilon = 1e-5,
-        image_size = 224,
-        patch_size = 14,
-        recompute_list = []
+        hidden_dropout=0.0,
+        attention_dropout=0.0,
+        no_persist_layer_norm=False,
+        layernorm_epsilon=1e-5,
+        pre_layernorm_epsilon=1e-5,
+        image_size=224,
+        patch_size=14,
+        recompute_list=[],
     )
 
     sam_model = build_sam_vit_b()
-
 
     vision_model = VitModel(
         cfg=vit_model_cfg,
@@ -491,7 +488,6 @@ if __name__ == '__main__':
     # x = torch.zeros(2, 3, 224, 224)
     x = torch.zeros(2, 3, 1024, 1024)
 
-    
     with torch.no_grad():
         # y = vision_model(x)
         patch_embed = sam_model(x)

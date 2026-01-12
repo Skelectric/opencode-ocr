@@ -1,0 +1,21 @@
+repos:
+  - repo: local
+    hooks:
+      - id: ruff
+        name: Run ruff
+        entry: ruff check --fix --exit-non-zero-on-fix
+        language: system
+        types: [python]
+        exclude: ^deepseek-ocr-testing/
+      - id: ruff-format
+        name: Run ruff format
+        entry: ruff format
+        language: system
+        types: [python]
+        exclude: ^deepseek-ocr-testing/
+      - id: pytest
+        name: Run pytest (Python)
+        entry: sh -c 'uv run pytest --ignore=deepseek-ocr-testing || test $? -eq 5'
+        language: system
+        pass_filenames: false
+        always_run: true

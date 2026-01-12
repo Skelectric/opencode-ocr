@@ -10,14 +10,12 @@ import torch.nn.functional as F
 
 from typing import Optional, Tuple, Type
 from functools import partial
-from flash_attn import flash_attn_qkvpacked_func
 # from .common import LayerNorm2d, MLPBlock
 
 # from mmgpt.model.vision_encoder.flash_4 import _attention_rel_h_rel_w
 
 
 def get_abs_pos(abs_pos, tgt_size):
-
     dtype = abs_pos.dtype
 
     src_size = abs_pos.size(1)
@@ -28,7 +26,7 @@ def get_abs_pos(abs_pos, tgt_size):
         new_pos_embed = F.interpolate(
             old_pos_embed,
             size=(tgt_size, tgt_size),
-            mode='bicubic',
+            mode="bicubic",
             antialias=True,
             align_corners=False,
         ).to(dtype)
@@ -36,8 +34,6 @@ def get_abs_pos(abs_pos, tgt_size):
         return new_pos_embed
     else:
         return abs_pos
-
-
 
 
 class MLPBlock(nn.Module):
@@ -126,7 +122,9 @@ class ImageEncoderViT(nn.Module):
         if use_abs_pos:
             # Initialize absolute positional embedding with pretrain image size.
             self.pos_embed = nn.Parameter(
-                torch.zeros(1, img_size // patch_size, img_size // patch_size, embed_dim)
+                torch.zeros(
+                    1, img_size // patch_size, img_size // patch_size, embed_dim
+                )
             )
 
         self.blocks = nn.ModuleList()
@@ -164,7 +162,9 @@ class ImageEncoderViT(nn.Module):
         )
 
         self.net_2 = nn.Conv2d(256, 512, kernel_size=3, stride=2, padding=1, bias=False)
-        self.net_3 = nn.Conv2d(512, 1024, kernel_size=3, stride=2, padding=1, bias=False)
+        self.net_3 = nn.Conv2d(
+            512, 1024, kernel_size=3, stride=2, padding=1, bias=False
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.patch_embed(x)
@@ -175,12 +175,12 @@ class ImageEncoderViT(nn.Module):
         for blk in self.blocks:
             x = blk(x)
 
-        neck_output  = self.neck(x.permute(0, 3, 1, 2))
-        conv2_output  = self.net_2(neck_output)
+        neck_output = self.neck(x.permute(0, 3, 1, 2))
+        conv2_output = self.net_2(neck_output)
         # print(f"conv2_output shape: {conv2_output.shape}")
-        conv3_output  = self.net_3(conv2_output)
+        conv3_output = self.net_3(conv2_output)
 
-        return conv3_output 
+        return conv3_output
 
 
 class Block(nn.Module):
@@ -226,7 +226,9 @@ class Block(nn.Module):
         )
 
         self.norm2 = norm_layer(dim)
-        self.mlp = MLPBlock(embedding_dim=dim, mlp_dim=int(dim * mlp_ratio), act=act_layer)
+        self.mlp = MLPBlock(
+            embedding_dim=dim, mlp_dim=int(dim * mlp_ratio), act=act_layer
+        )
 
         self.window_size = window_size
 
@@ -281,9 +283,9 @@ class Attention(nn.Module):
 
         self.use_rel_pos = use_rel_pos
         if self.use_rel_pos:
-            assert (
-                input_size is not None
-            ), "Input size must be provided if using relative positional encoding."
+            assert input_size is not None, (
+                "Input size must be provided if using relative positional encoding."
+            )
             # initialize relative positional embeddings
             self.rel_pos_h = nn.Parameter(torch.zeros(2 * input_size[0] - 1, head_dim))
             self.rel_pos_w = nn.Parameter(torch.zeros(2 * input_size[1] - 1, head_dim))
@@ -291,39 +293,55 @@ class Attention(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, H, W, _ = x.shape
         # qkv with shape (3, B, nHead, H * W, C)
-        qkv = self.qkv(x).reshape(B, H * W, 3, self.num_heads, -1).permute(2, 0, 3, 1, 4)
+        qkv = (
+            self.qkv(x).reshape(B, H * W, 3, self.num_heads, -1).permute(2, 0, 3, 1, 4)
+        )
         # q, k, v with shape (B * nHead, H * W, C)
         q, k, v = qkv.reshape(3, B * self.num_heads, H * W, -1).unbind(0)
 
         rel_h, rel_w = None, None
         if self.use_rel_pos:
-            rel_h, rel_w = add_decomposed_rel_pos(q, self.rel_pos_h, self.rel_pos_w, (H, W), (H, W))
+            rel_h, rel_w = add_decomposed_rel_pos(
+                q, self.rel_pos_h, self.rel_pos_w, (H, W), (H, W)
+            )
 
         q = q.view(B, self.num_heads, H * W, -1)
         k = k.view(B, self.num_heads, H * W, -1)
         v = v.view(B, self.num_heads, H * W, -1)
 
         if self.use_rel_pos:
-            rel_h = rel_h.view(B, self.num_heads, rel_h.size(1), rel_h.size(2), rel_h.size(3))
-            rel_w = rel_w.view(B, self.num_heads, rel_w.size(1), rel_w.size(2), rel_w.size(3))
-            attn_bias = (rel_h + rel_w).view(B, self.num_heads, rel_h.size(2), rel_h.size(3) * rel_w.size(4))
-            x = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=attn_bias)
+            rel_h = rel_h.view(
+                B, self.num_heads, rel_h.size(1), rel_h.size(2), rel_h.size(3)
+            )
+            rel_w = rel_w.view(
+                B, self.num_heads, rel_w.size(1), rel_w.size(2), rel_w.size(3)
+            )
+            attn_bias = (rel_h + rel_w).view(
+                B, self.num_heads, rel_h.size(2), rel_h.size(3) * rel_w.size(4)
+            )
+            x = torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, attn_mask=attn_bias
+            )
             # x = _attention_rel_h_rel_w(q, k, v, rel_h, rel_w)
         else:
             x = torch.nn.functional.scaled_dot_product_attention(q, k, v)
             # qkv = torch.stack([q, k, v], dim=1).transpose(1, 3).reshape(B, H * W, 3, self.num_heads, -1)
             # x = flash_attn_qkvpacked_func(qkv, dropout_p=0.0, causal=False).transpose(1, 2)
 
-        
-
-        x = x.view(B, self.num_heads, H, W, -1).permute(0, 2, 3, 1, 4).reshape(B, H, W, -1)
+        x = (
+            x.view(B, self.num_heads, H, W, -1)
+            .permute(0, 2, 3, 1, 4)
+            .reshape(B, H, W, -1)
+        )
 
         x = self.proj(x)
 
         return x
 
 
-def window_partition(x: torch.Tensor, window_size: int) -> Tuple[torch.Tensor, Tuple[int, int]]:
+def window_partition(
+    x: torch.Tensor, window_size: int
+) -> Tuple[torch.Tensor, Tuple[int, int]]:
     """
     Partition into non-overlapping windows with padding if needed.
     Args:
@@ -343,12 +361,17 @@ def window_partition(x: torch.Tensor, window_size: int) -> Tuple[torch.Tensor, T
     Hp, Wp = H + pad_h, W + pad_w
 
     x = x.view(B, Hp // window_size, window_size, Wp // window_size, window_size, C)
-    windows = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(-1, window_size, window_size, C)
+    windows = (
+        x.permute(0, 1, 3, 2, 4, 5).contiguous().view(-1, window_size, window_size, C)
+    )
     return windows, (Hp, Wp)
 
 
 def window_unpartition(
-    windows: torch.Tensor, window_size: int, pad_hw: Tuple[int, int], hw: Tuple[int, int]
+    windows: torch.Tensor,
+    window_size: int,
+    pad_hw: Tuple[int, int],
+    hw: Tuple[int, int],
 ) -> torch.Tensor:
     """
     Window unpartition into original sequences and removing padding.
@@ -364,7 +387,9 @@ def window_unpartition(
     Hp, Wp = pad_hw
     H, W = hw
     B = windows.shape[0] // (Hp * Wp // window_size // window_size)
-    x = windows.view(B, Hp // window_size, Wp // window_size, window_size, window_size, -1)
+    x = windows.view(
+        B, Hp // window_size, Wp // window_size, window_size, window_size, -1
+    )
     x = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(B, Hp, Wp, -1)
 
     if Hp > H or Wp > W:
@@ -400,8 +425,12 @@ def get_rel_pos(q_size: int, k_size: int, rel_pos: torch.Tensor) -> torch.Tensor
         rel_pos_resized = rel_pos
 
     # Scale the coords with short length if shapes for q and k are different.
-    q_coords = torch.arange(q_size, device=rel_pos.device)[:, None] * max(k_size / q_size, 1.0)
-    k_coords = torch.arange(k_size, device=rel_pos.device)[None, :] * max(q_size / k_size, 1.0)
+    q_coords = torch.arange(q_size, device=rel_pos.device)[:, None] * max(
+        k_size / q_size, 1.0
+    )
+    k_coords = torch.arange(k_size, device=rel_pos.device)[None, :] * max(
+        q_size / k_size, 1.0
+    )
     relative_coords = (q_coords - k_coords) + (k_size - 1) * max(q_size / k_size, 1.0)
 
     return rel_pos_resized[relative_coords.long()]
@@ -498,22 +527,21 @@ def _build_sam(
     prompt_embed_dim = 256
     image_size = 1024
     vit_patch_size = 16
-    image_embedding_size = image_size // vit_patch_size
-    image_encoder=ImageEncoderViT(
-            depth=encoder_depth,
-            embed_dim=encoder_embed_dim,
-            img_size=image_size,
-            mlp_ratio=4,
-            norm_layer=partial(torch.nn.LayerNorm, eps=1e-6),
-            num_heads=encoder_num_heads,
-            patch_size=vit_patch_size,
-            qkv_bias=True,
-            use_rel_pos=True,
-            global_attn_indexes=encoder_global_attn_indexes,
-            window_size=14,
-            out_chans=prompt_embed_dim,
-        )
-    
+    image_encoder = ImageEncoderViT(
+        depth=encoder_depth,
+        embed_dim=encoder_embed_dim,
+        img_size=image_size,
+        mlp_ratio=4,
+        norm_layer=partial(torch.nn.LayerNorm, eps=1e-6),
+        num_heads=encoder_num_heads,
+        patch_size=vit_patch_size,
+        qkv_bias=True,
+        use_rel_pos=True,
+        global_attn_indexes=encoder_global_attn_indexes,
+        window_size=14,
+        out_chans=prompt_embed_dim,
+    )
+
     if checkpoint is not None:
         # with open(checkpoint, "rb") as f:
         state_dict = torch.load(checkpoint)
@@ -523,6 +551,9 @@ def _build_sam(
         # ocr-anyting
         # image_encoder.load_state_dict(state_dict, strict=True)
         # tob
-        image_encoder.load_state_dict({k[30:]: v for k, v in state_dict.items() if 'vision_tower_high' in k}, strict=True)
+        image_encoder.load_state_dict(
+            {k[30:]: v for k, v in state_dict.items() if "vision_tower_high" in k},
+            strict=True,
+        )
         print(checkpoint)
     return image_encoder
