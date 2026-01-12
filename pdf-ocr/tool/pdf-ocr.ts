@@ -7,7 +7,7 @@ export default tool({
     output_format: tool.schema.string().describe("Output format: 'markdown' or 'text' (defaults to 'markdown')")
   },
   async execute(args) {
-    const result = await Bun.$`uv run --directory ~/opencode-ocr/pdf-ocr pdf_ocr_backend.py ${args.pdf_path} ${args.output_format || 'markdown'}`.text()
+    const result = await Bun.$`uv run --directory ~/.config/opencode/tool --env-file ~/.config/opencode/tool/.env pdf_ocr_backend.py ${args.pdf_path} ${args.output_format || 'markdown'}`.text()
     return result.trim()
   }
 })
