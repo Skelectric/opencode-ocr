@@ -12,16 +12,16 @@ Use the provided deployment script for one-command installation and updates:
 
 ```bash
 # Initial installation
-./pdf-ocr/deploy-tool.sh
+./deploy-tool.sh
 
 # Update after making changes to the repository
-./pdf-ocr/deploy-tool.sh
+./deploy-tool.sh
 
 # Force reinstallation (even if already installed)
-./pdf-ocr/deploy-tool.sh --force
+./deploy-tool.sh --force
 
 # Specify custom repository path
-./pdf-ocr/deploy-tool.sh --repo /path/to/opencode-ocr
+./deploy-tool.sh --repo /path/to/opencode-ocr
 ```
 
 The script automatically detects if the tool is already installed and performs an update instead.

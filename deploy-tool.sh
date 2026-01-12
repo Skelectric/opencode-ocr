@@ -69,6 +69,24 @@ cp "$REPO_DIR/pdf-ocr/pyproject.toml" "$TOOL_DIR/"
 # Make Python script executable
 chmod +x "$TOOL_DIR/pdf_ocr_backend.py"
 
+# Check if .env file exists, if not prompt for endpoint
+ENV_FILE="$TOOL_DIR/.env"
+if [ ! -f "$ENV_FILE" ]; then
+    echo ""
+    echo "No .env file found. Please provide the DeepSeek-OCR endpoint."
+    read -p "Enter DeepSeek-OCR endpoint URL (e.g., http://localhost:8080/v1): " ENDPOINT
+    
+    if [ -z "$ENDPOINT" ]; then
+        echo "Warning: No endpoint provided. Creating .env with placeholder."
+        ENDPOINT="http://your-endpoint:8080/v1"
+    fi
+    
+    echo "DEEPSEEK_OCR_BASE_URL=\"$ENDPOINT\"" > "$ENV_FILE"
+    echo ".env file created at $ENV_FILE"
+else
+    echo ".env file already exists at $ENV_FILE"
+fi
+
 # Install/update Python dependencies
 echo "Installing Python dependencies..."
 cd "$TOOL_DIR"
