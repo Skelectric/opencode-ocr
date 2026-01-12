@@ -15,7 +15,7 @@ repos:
         exclude: ^deepseek-ocr-testing/
       - id: pytest
         name: Run pytest (Python)
-        entry: sh -c 'uv run pytest --ignore=deepseek-ocr-testing || test $? -eq 5'
+        entry: sh -c 'uv run pytest'
         language: system
         pass_filenames: false
         always_run: true
