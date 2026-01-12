@@ -11,7 +11,7 @@ from pathlib import Path
 
 def test_multipage_pdf():
     """Test multi-page PDF processing."""
-    pdf_path = Path(__file__).parent / "multipage.pdf"
+    pdf_path = Path(__file__).parent / "test_data" / "multipage.pdf"
 
     if not pdf_path.exists():
         print("❌ Test PDF not found")
@@ -26,7 +26,7 @@ def test_multipage_pdf():
             "uv",
             "run",
             "--directory",
-            str(Path(__file__).parent),
+            str(Path(__file__).parent.parent / "pdf-ocr"),
             "python3",
             "tool/pdf_ocr_backend.py",
             str(pdf_path),
@@ -90,7 +90,7 @@ def test_multipage_pdf():
             "uv",
             "run",
             "--directory",
-            str(Path(__file__).parent),
+            str(Path(__file__).parent.parent / "pdf-ocr"),
             "python3",
             "tool/pdf_ocr_backend.py",
             str(pdf_path),

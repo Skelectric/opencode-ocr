@@ -11,4 +11,3 @@ dependencies = [
 [tool.pytest.ini_options]
 testpaths = ["."]
 python_files = ["test_*.py", "*_test.py"]
-addopts = "--ignore=deepseek-ocr-testing"

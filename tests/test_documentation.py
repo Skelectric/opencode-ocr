@@ -8,7 +8,7 @@ from pathlib import Path
 
 def test_deploy_script_exists():
     """Verify deploy-tool.sh exists and is executable."""
-    deploy_script = Path(__file__).parent / "deploy-tool.sh"
+    deploy_script = Path(__file__).parent.parent / "pdf-ocr" / "deploy-tool.sh"
 
     if not deploy_script.exists():
         print("FAIL: deploy-tool.sh not found")
@@ -24,7 +24,7 @@ def test_deploy_script_exists():
 
 def test_deploy_script_syntax():
     """Verify deploy-tool.sh has valid bash syntax."""
-    deploy_script = Path(__file__).parent / "deploy-tool.sh"
+    deploy_script = Path(__file__).parent.parent / "pdf-ocr" / "deploy-tool.sh"
 
     try:
         result = subprocess.run(
@@ -42,7 +42,7 @@ def test_deploy_script_syntax():
 
 def test_deploy_script_help():
     """Verify deploy-tool.sh can display usage information."""
-    deploy_script = Path(__file__).parent / "deploy-tool.sh"
+    deploy_script = Path(__file__).parent.parent / "pdf-ocr" / "deploy-tool.sh"
 
     try:
         # Test with invalid option to trigger usage message
@@ -66,7 +66,7 @@ def test_deploy_script_help():
 
 def test_pyproject_no_scripts():
     """Verify pyproject.toml does not have project.scripts section."""
-    pyproject = Path(__file__).parent / "pyproject.toml"
+    pyproject = Path(__file__).parent.parent / "pyproject.toml"
 
     if not pyproject.exists():
         print("FAIL: pyproject.toml not found")
