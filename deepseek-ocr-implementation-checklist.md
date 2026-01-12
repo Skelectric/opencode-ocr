@@ -151,14 +151,32 @@
 ## Phase 4: Documentation & Maintenance
 
 ### 4.1 Verify Tool Documentation
-- [ ] Review tool description in pdf-ocr.ts
-- [ ] Confirm description clearly states tool purpose
-- [ ] Confirm description mentions markdown and text output formats
-- [ ] Confirm description indicates when to use the tool
-- [ ] Verify no AGENTS.md modifications are needed
-- [ ] Test that tool description is automatically available to agents
-- [ ] Document that Python scripts should be run with `uv run`
+- [x] Review tool description in pdf-ocr.ts
+- [x] Confirm description clearly states tool purpose
+- [x] Confirm description mentions markdown and text output formats
+- [x] Confirm description indicates when to use the tool
+- [x] Verify no AGENTS.md modifications are needed
+- [x] Test that tool description is automatically available to agents
+- [x] Document that Python scripts should be run with `uv run`
 
-### 4.4 Future Enhancement Planning
+### 4.2 Create Deployment Script
+- [x] Create deploy-tool.sh script (combines installation and update)
+- [x] Make script executable with chmod +x
+- [x] Add error handling and validation to script
+- [x] Support --force flag for reinstallation
+- [x] Support --repo flag for custom repository path
+- [x] Auto-detect installation status (install vs update)
+- [x] Create test_deploy_script.py unit tests
+- [x] Update test_documentation.py to include deployment script tests
+- [x] Run tests and verify script works correctly
+- [x] Update README.md with deployment script documentation
+- [x] Verify pre-commit checks pass for all script files
+- [x] Combine install-tool.sh and update-tool.sh into single deploy-tool.sh
+- [x] Remove old installation script files
+- [x] Remove [project.scripts] from pyproject.toml to fix uv sync warning
+- [x] Fix verification step in deploy-tool.sh (remove invalid opencode tools command)
+- [x] Test deployment script successfully
+
+### 4.3 Future Enhancement Planning
 - [ ] Document partial page range support as future enhancement
 
