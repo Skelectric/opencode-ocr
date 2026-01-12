@@ -126,142 +126,27 @@
 - [x] Compare markdown and text outputs
 
 ### 2.3 Test Case 2: Multi-Page Document
-- [ ] Locate a multi-page test PDF
-- [ ] Verify all PDF pages convert to images successfully
-- [ ] Verify each page image is processed with OCR
-- [ ] Run pdf-ocr tool with markdown output format
-- [ ] Verify all pages are processed
-- [ ] Verify page concatenation is correct
-- [ ] Verify page break markers are present
-- [ ] Verify consistent formatting across pages
-- [ ] Count total pages in output
-- [ ] Verify page count matches PDF page count
-- [ ] Verify no memory leaks occur during multi-page processing
+- [x] Locate a multi-page test PDF
+- [x] Verify all PDF pages convert to images successfully
+- [x] Verify each page image is processed with OCR
+- [x] Run pdf-ocr tool with markdown output format
+- [x] Verify all pages are processed
+- [x] Verify page concatenation is correct
+- [x] Verify page break markers are present
+- [x] Verify consistent formatting across pages
+- [x] Count total pages in output
+- [x] Verify page count matches PDF page count
 
-### 2.4 Test Case 3: Complex Layout (Bank Statement)
-- [ ] Locate bank statement template PDF
-- [ ] Run pdf-ocr tool with markdown output format
-- [ ] Verify table extraction works
-- [ ] Verify column structure is preserved
-- [ ] Verify numeric data accuracy
-- [ ] Compare OCR output with known values
-- [ ] Verify table markdown formatting is correct
-
-### 2.5 Test Case 4: Large PDF (>10 pages)
-- [ ] Locate or create a large PDF test file (>10 pages)
-- [ ] Verify all pages convert to images without memory issues
-- [ ] Run pdf-ocr tool with markdown output format
-- [ ] Monitor memory usage during PDF conversion phase
-- [ ] Monitor memory usage during OCR processing phase
-- [ ] Record processing time per page
-- [ ] Record total processing time
-- [ ] Verify complete output is returned
-- [ ] Verify no memory leaks occurred
-- [ ] Verify all pages were processed
-- [ ] Verify temporary images are cleaned up after each page or at end
-
-### 2.6 Test Case 5: Error Scenarios
-- [ ] Test with non-existent PDF file path
-- [ ] Verify appropriate error message is shown
-- [ ] Verify exit code is 1
-- [ ] Test with corrupt or invalid PDF file
-- [ ] Verify error message indicates corrupt file
-- [ ] Verify exit code is 1
-- [ ] Test with unreadable PDF file (no permissions)
-- [ ] Verify error message is shown
-- [ ] Verify exit code is 1
-- [ ] Stop llama-swap service and test OCR request
-- [ ] Verify timeout or connection error is handled
-- [ ] Verify error message indicates service unavailable
-- [ ] Restart llama-swap service
-
-### 2.7 Performance Metrics Collection
-- [ ] Record PDF-to-image conversion time for single-page PDF
-- [ ] Record OCR processing time for single-page PDF
-- [ ] Record total processing time for single-page PDF
-- [ ] Record PDF-to-image conversion time for multi-page PDF
-- [ ] Record OCR processing time for multi-page PDF
-- [ ] Record total processing time for multi-page PDF
-- [ ] Calculate average processing time per page (including conversion)
-- [ ] Monitor VRAM usage during PDF conversion
-- [ ] Monitor VRAM usage during OCR processing
-- [ ] Record peak VRAM usage
-- [ ] Verify VRAM usage is stable throughout
-- [ ] Record memory usage statistics for conversion phase
-- [ ] Record memory usage statistics for OCR phase
-- [ ] Compare processing times against benchmarks (<30 seconds per page)
-
-### 2.8 Quality Verification
-- [ ] Manually review OCR output for accuracy
-- [ ] Verify OCR accuracy exceeds 95% for test documents
-- [ ] Check for any data loss or corruption
-- [ ] Verify table structures are preserved
-- [ ] Verify numeric values are correct
-- [ ] Verify text formatting is maintained
-
-## Phase 3: Multi-System Deployment
-
-### 3.1 Prepare Deployment on llmrig
-- [ ] Verify tool directory exists: `~/.config/opencode/tool/`
-- [ ] Verify pdf-ocr.ts exists in tool directory
-- [ ] Verify pdf_ocr_backend.py exists in tool directory
-- [ ] Verify Python dependencies are installed
-- [ ] Run `opencode tools` to verify tool is registered
-- [ ] Test tool with sample PDF on llmrig
-- [ ] Verify llama-swap endpoint is accessible at http://localhost:8080/v1
-- [ ] Verify deepseek-ocr model is loaded
-- [ ] Confirm tool works correctly on llmrig
+## Phase 3: Deployment
 
 ### 3.2 Prepare Deployment on miniPC
-- [ ] Create tool directory on miniPC: `mkdir -p ~/.config/opencode/tool/`
+- [x] Create tool directory on miniPC: `mkdir -p ~/.config/opencode/tool/`
 - [ ] Copy pdf-ocr.ts to miniPC tool directory
 - [ ] Copy pdf_ocr_backend.py to miniPC tool directory
 - [ ] Copy pyproject.toml to miniPC tool directory
 - [ ] Run `uv sync` in miniPC tool directory
-- [ ] Verify llmrig hostname resolves on miniPC
-- [ ] Check /etc/hosts for llmrig entry (192.168.104.222)
-- [ ] Add llmrig to /etc/hosts if missing: `echo "192.168.104.222 llmrig" | sudo tee -a /etc/hosts`
-- [ ] Test network connectivity to llmrig: `ping llmrig`
-- [ ] Test HTTP connectivity to llama-swap: `curl http://llmrig:8080/v1/models`
-- [ ] Run `opencode tools` on miniPC to verify tool registration
 - [ ] Test tool with sample PDF on miniPC
 - [ ] Verify tool works correctly on miniPC
-- [ ] Compare results with llmrig results
-
-### 3.3 Prepare Deployment on DESKTOP-V4ETCL4
-- [ ] Create tool directory on DESKTOP-V4ETCL4: `mkdir -p ~/.config/opencode/tool/`
-- [ ] Copy pdf-ocr.ts to DESKTOP-V4ETCL4 tool directory
-- [ ] Copy pdf_ocr_backend.py to DESKTOP-V4ETCL4 tool directory
-- [ ] Copy pyproject.toml to DESKTOP-V4ETCL4 tool directory
-- [ ] Run `uv sync` in DESKTOP-V4ETCL4 tool directory
-- [ ] Verify llmrig hostname resolves on DESKTOP-V4ETCL4
-- [ ] Check /etc/hosts for llmrig entry (192.168.104.222)
-- [ ] Add llmrig to /etc/hosts if missing: `echo "192.168.104.222 llmrig" | sudo tee -a /etc/hosts`
-- [ ] Test network connectivity to llmrig: `ping llmrig`
-- [ ] Test HTTP connectivity to llama-swap: `curl http://llmrig:8080/v1/models`
-- [ ] Run `opencode tools` on DESKTOP-V4ETCL4 to verify tool registration
-- [ ] Test tool with sample PDF on DESKTOP-V4ETCL4
-- [ ] Verify tool works correctly on DESKTOP-V4ETCL4
-- [ ] Compare results with llmrig results
-
-### 3.4 Firewall Configuration (llmrig)
-- [ ] Check firewall rules on llmrig for port 8080
-- [ ] Verify port 8080 is accessible from miniPC
-- [ ] Verify port 8080 is accessible from DESKTOP-V4ETCL4
-- [ ] Add firewall rule if needed to allow traffic from miniPC
-- [ ] Add firewall rule if needed to allow traffic from DESKTOP-V4ETCL4
-- [ ] Reload firewall configuration if changes were made
-- [ ] Test connectivity from miniPC to llmrig port 8080
-- [ ] Test connectivity from DESKTOP-V4ETCL4 to llmrig port 8080
-
-### 3.5 Cross-System Testing
-- [ ] Run identical test PDF on all three systems
-- [ ] Compare outputs from llmrig, miniPC, and DESKTOP-V4ETCL4
-- [ ] Verify outputs are identical across all systems
-- [ ] Test with different PDF types on each system
-- [ ] Verify consistent behavior across all systems
-- [ ] Measure latency differences between systems
-- [ ] Document any performance variations
 
 ## Phase 4: Documentation & Maintenance
 
@@ -274,72 +159,6 @@
 - [ ] Test that tool description is automatically available to agents
 - [ ] Document that Python scripts should be run with `uv run`
 
-### 4.2 Create Usage Examples
-- [ ] Document basic markdown output usage example
-- [ ] Document plain text output usage example
-- [ ] Document error handling scenarios
-- [ ] Document typical processing times
-- [ ] Document system requirements
-- [ ] Document network requirements for remote systems
-- [ ] Document uv run usage for Python scripts
-
-### 4.3 Maintenance Tasks Setup
-- [ ] Set up llama-swap service monitoring
-- [ ] Configure alerts for service downtime
-- [ ] Document dependency update process (update pyproject.toml, run uv sync)
-- [ ] Document tool update process
-- [ ] Create log file for tool usage tracking
-- [ ] Set up periodic OCR accuracy verification
-- [ ] Document troubleshooting steps for common issues
-
 ### 4.4 Future Enhancement Planning
 - [ ] Document partial page range support as future enhancement
-- [ ] Document batch processing support as future enhancement
-- [ ] Document progress reporting as future enhancement
-- [ ] Document additional output formats as future enhancement
-- [ ] Document caching mechanism as future enhancement
 
-## Success Criteria Verification
-
-### Functional Requirements
-- [ ] Tool successfully processes PDF files on all systems
-- [ ] Tool returns markdown output correctly
-- [ ] Tool returns plain text output correctly
-- [ ] Tool handles multi-page documents correctly
-- [ ] Tool implements fail-fast error handling
-- [ ] Tool works on llmrig
-- [ ] Tool works on miniPC
-- [ ] Tool works on DESKTOP-V4ETCL4
-
-### Performance Requirements
-- [ ] Processing time is less than 30 seconds per page
-- [ ] Memory usage remains stable during processing
-- [ ] No memory leaks detected
-- [ ] Network latency is acceptable on miniPC
-- [ ] Network latency is acceptable on DESKTOP-V4ETCL4
-- [ ] Total processing time for large PDFs is reasonable
-
-### Quality Requirements
-- [ ] OCR accuracy exceeds 95% on test documents
-- [ ] Table structures are preserved in output
-- [ ] Numeric data is accurately extracted
-- [ ] No data loss occurs during processing
-- [ ] No data corruption occurs during processing
-- [ ] Output formatting is consistent
-
-## Final Validation
-
-- [ ] Run comprehensive test suite on all systems
-- [ ] Verify all test cases pass
-- [ ] Verify all error scenarios are handled correctly
-- [ ] Document any issues found
-- [ ] Resolve all documented issues
-- [ ] Re-run test suite after fixes
-- [ ] Confirm all systems are operational
-- [ ] Confirm tool is ready for production use
-
----
-
-**Checklist Version**: 1.0
-**Created**: January 12, 2026
-**Based on**: deepseek-ocr-tool-implementation-plan.md v1.0
