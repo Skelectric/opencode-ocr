@@ -6,6 +6,13 @@ from openai import OpenAI
 from pathlib import Path
 import base64
 import argparse
+from dotenv import load_dotenv
+
+# Load environment variables from .env file in the tool directory
+tool_dir = Path(__file__).parent
+env_path = tool_dir / ".env"
+if env_path.exists():
+    load_dotenv(env_path)
 
 
 def main():
