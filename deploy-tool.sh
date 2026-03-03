@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
 # Installation/Update script for DeepSeek-OCR PDF Tool
@@ -69,19 +69,38 @@ cp "$REPO_DIR/pdf-ocr/pyproject.toml" "$TOOL_DIR/"
 # Make Python script executable
 chmod +x "$TOOL_DIR/pdf_ocr_backend.py"
 
-# Check if .env file exists, if not prompt for endpoint
+# Check if .env file exists, if not prompt for configuration
 ENV_FILE="$TOOL_DIR/.env"
 if [ ! -f "$ENV_FILE" ]; then
     echo ""
-    echo "No .env file found. Please provide the DeepSeek-OCR endpoint."
-    read -p "Enter DeepSeek-OCR endpoint URL (e.g., http://localhost:8080/v1): " ENDPOINT
+    echo "No .env file found. Please provide configuration."
+    echo ""
+    echo "This tool requires a llama-swap proxy endpoint that provides:"
+    echo "  - DeepSeek-OCR model serving"
+    echo "  - Model status endpoint (/running)"
+    echo "  - Model capability checks (/upstream/{model}/props)"
+    echo ""
+    
+    # Prompt for llama-swap endpoint
+    read -p "Enter llama-swap endpoint URL (e.g., http://localhost:8080): " ENDPOINT
     
     if [ -z "$ENDPOINT" ]; then
-        echo "Warning: No endpoint provided. Creating .env with placeholder."
-        ENDPOINT="http://your-endpoint:8080/v1"
+        echo "Warning: No endpoint provided. Creating .env using default."
+        ENDPOINT="http://localhost:8080"
     fi
     
     echo "DEEPSEEK_OCR_BASE_URL=\"$ENDPOINT\"" > "$ENV_FILE"
+    
+    # Prompt for VRAM threshold
+    echo ""
+    read -p "Enter VRAM threshold in GB for DeepSeek-OCR [default: 17]: " VRAM_THRESHOLD
+    
+    if [ -z "$VRAM_THRESHOLD" ]; then
+        VRAM_THRESHOLD="17"
+    fi
+    
+    echo "PDF_OCR_VRAM_THRESHOLD_GB=\"$VRAM_THRESHOLD\"" >> "$ENV_FILE"
+    
     echo ".env file created at $ENV_FILE"
 else
     echo ".env file already exists at $ENV_FILE"
