@@ -377,7 +377,9 @@ def process_with_deepseek_ocr(pdf_path: str, output_format: str) -> str:
         if doc.page_count == 0:
             raise Exception("PDF has no pages")
 
-        client = OpenAI(api_key="EMPTY", base_url=base_url, timeout=3600)
+        # DeepSeek-OCR needs the /v1 endpoint
+        deepseek_url = base_url.rstrip("/") + "/v1"
+        client = OpenAI(api_key="EMPTY", base_url=deepseek_url, timeout=3600)
         prompt_template = get_prompt_template("deepseek-ocr")
 
         results = process_pdf_pages(doc, client, "deepseek-ocr", prompt_template)
