@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import sys
 import os
-import subprocess
+import json
 from typing import Tuple, Optional
 import fitz
 from openai import OpenAI
@@ -24,36 +24,18 @@ def validate_environment_variables():
     errors = []
     warnings = []
 
-    # Validate PDF_OCR_VRAM_THRESHOLD_GB (optional, must be positive integer)
-    vram_threshold = os.getenv("PDF_OCR_VRAM_THRESHOLD_GB")
-    if vram_threshold:
-        try:
-            vram_value = int(vram_threshold)
-            if vram_value <= 0:
-                errors.append(
-                    f"PDF_OCR_VRAM_THRESHOLD_GB must be a positive integer: {vram_threshold}"
-                )
-            elif vram_value < 10:
-                warnings.append(
-                    f"PDF_OCR_VRAM_THRESHOLD_GB is set to {vram_value} GB, which is quite low. "
-                    "DeepSeek-OCR may not load properly with less than 10-17 GB."
-                )
-            elif vram_value > 48:
-                warnings.append(
-                    f"PDF_OCR_VRAM_THRESHOLD_GB is set to {vram_value} GB, which is quite high. "
-                    "This may rarely allow DeepSeek-OCR to load."
-                )
-        except ValueError:
-            errors.append(
-                f"PDF_OCR_VRAM_THRESHOLD_GB must be a valid integer: {vram_threshold}"
-            )
-
     # Validate DEEPSEEK_OCR_BASE_URL (required)
     deepseek_url = os.getenv("DEEPSEEK_OCR_BASE_URL")
     if deepseek_url and not deepseek_url.startswith(("http://", "https://")):
         errors.append(
             f"DEEPSEEK_OCR_BASE_URL must be a valid URL starting with http:// or https://: {deepseek_url}"
         )
+
+    # Check for routing config file (warning only if missing)
+    tool_dir = Path(__file__).parent
+    config_path = tool_dir / "ocr_routing.json"
+    if not config_path.exists():
+        warnings.append(f"Routing config not found at {config_path}, using defaults")
 
     return errors, warnings
 
@@ -75,64 +57,6 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
-
-
-def check_vram_availability() -> Tuple[bool, int]:
-    """
-    Check if sufficient VRAM is available for DeepSeek-OCR.
-
-    Returns:
-        Tuple[bool, int]: (has_sufficient_vram, free_vram_mb)
-        - has_sufficient_vram: True if VRAM check succeeded and has > 0 MB free
-        - free_vram_mb: Total free VRAM in megabytes across all GPUs
-
-    Raises:
-        subprocess.CalledProcessError: If nvidia-smi command fails
-    """
-    try:
-        result = subprocess.run(
-            ["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-
-        # Parse output - each line represents one GPU
-        free_memory_values = []
-        for line in result.stdout.strip().split("\n"):
-            if line.strip():
-                try:
-                    free_mb = int(line.strip())
-                    free_memory_values.append(free_mb)
-                except ValueError:
-                    logger.warning(f"Could not parse VRAM value: {line}")
-                    continue
-
-        if not free_memory_values:
-            logger.error("No VRAM values could be parsed from nvidia-smi output")
-            return (False, 0)
-
-        # Sum free VRAM across all GPUs
-        total_free_mb = sum(free_memory_values)
-        has_sufficient = total_free_mb > 0
-
-        logger.info(
-            f"VRAM Detection: Found {len(free_memory_values)} GPU(s), "
-            f"Total free VRAM: {total_free_mb} MB ({total_free_mb / 1024:.2f} GB)"
-        )
-
-        return (has_sufficient, total_free_mb)
-
-    except subprocess.CalledProcessError as e:
-        logger.error(f"nvidia-smi command failed: {e}")
-        logger.error(f"stderr: {e.stderr}")
-        raise
-    except FileNotFoundError:
-        logger.error("nvidia-smi not found. Ensure NVIDIA drivers are installed.")
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error checking VRAM: {e}")
-        raise
 
 
 def get_current_model(base_url: str) -> Optional[str]:
@@ -433,9 +357,75 @@ def process_with_current_model(
             doc.close()
 
 
+def load_ocr_routing_config(config_path: Optional[Path] = None) -> dict:
+    """
+    Load OCR routing configuration from JSON file.
+
+    Args:
+        config_path: Path to the routing config file. If None, uses default location.
+
+    Returns:
+        dict: Routing configuration with model mappings
+    """
+    if config_path is None:
+        tool_dir = Path(__file__).parent
+        config_path = tool_dir / "ocr_routing.json"
+
+    default_config = {"ocr_routing": {}, "default": "current_model"}
+
+    if not config_path.exists():
+        logger.warning(f"Routing config not found at {config_path}, using defaults")
+        return default_config
+
+    try:
+        with open(config_path, "r") as f:
+            config = json.load(f)
+
+        # Validate config structure
+        if "ocr_routing" not in config:
+            config["ocr_routing"] = {}
+        if "default" not in config:
+            config["default"] = "current_model"
+
+        return config
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON in routing config: {e}")
+        return default_config
+    except Exception as e:
+        logger.error(f"Error loading routing config: {e}")
+        return default_config
+
+
+def get_ocr_method_for_model(model_id: str, config: dict) -> str:
+    """
+    Determine OCR method for a given model based on routing configuration.
+
+    Args:
+        model_id: The current model ID
+        config: The routing configuration dictionary
+
+    Returns:
+        str: "deepseek-ocr" or "current_model"
+    """
+    routing = config.get("ocr_routing", {})
+    default = config.get("default", "current_model")
+
+    # Check for exact match
+    if model_id in routing:
+        return routing[model_id]
+
+    # Check for partial match (e.g., "kimi-k2.5" matches "ik_llama.cpp/kimi-k2.5-experimental")
+    for pattern, method in routing.items():
+        if pattern in model_id or model_id in pattern:
+            return method
+
+    # Return default
+    return default
+
+
 def route_ocr_request(pdf_path: str, output_format: str) -> str:
     """
-    Route OCR request based on VRAM and model capabilities.
+    Route OCR request based on model-based configuration.
 
     Args:
         pdf_path: Path to the PDF file
@@ -446,61 +436,50 @@ def route_ocr_request(pdf_path: str, output_format: str) -> str:
 
     Exits:
         0: Success (DeepSeek-OCR or current multimodal model used)
-        1: General error (file not found, processing error, etc.)
-        3: INSUFFICIENT_VRAM_NO_MULTIMODAL (not enough VRAM and current model lacks vision support)
+        1: General error (file not found, processing error, DeepSeek-OCR failure, etc.)
+        3: NO_OCR_SUPPORT (current_model routing but model lacks vision support)
     """
-    # Get the base URL for API calls (single endpoint for all operations)
     base_url = os.getenv("DEEPSEEK_OCR_BASE_URL")
-
     if not base_url:
-        raise Exception(
-            "DEEPSEEK_OCR_BASE_URL not set. Set it via environment variable or .env file"
-        )
+        raise Exception("DEEPSEEK_OCR_BASE_URL not set")
 
-    # Get configurable threshold (default: 17 GB)
-    try:
-        vram_threshold_gb = int(os.getenv("PDF_OCR_VRAM_THRESHOLD_GB", "17"))
-    except ValueError:
-        logger.warning("Invalid PDF_OCR_VRAM_THRESHOLD_GB value, using default 17")
-        vram_threshold_gb = 17
+    # Load routing configuration
+    routing_config = load_ocr_routing_config()
 
-    vram_threshold_mb = vram_threshold_gb * 1024
+    # Get current model
+    current_model = get_current_model(base_url)
+    if not current_model:
+        raise Exception("No model currently loaded")
 
-    # Check VRAM availability
-    try:
-        has_sufficient_vram, free_vram_mb = check_vram_availability()
-    except Exception as e:
-        logger.error(f"Failed to check VRAM availability: {e}")
-        # Fall back to DeepSeek-OCR if VRAM check fails
-        logger.info("VRAM check failed, falling back to DeepSeek-OCR")
-        return process_with_deepseek_ocr(pdf_path, output_format)
+    # Determine OCR method based on configuration
+    ocr_method = get_ocr_method_for_model(current_model, routing_config)
 
-    logger.info(
-        f"VRAM Check: {free_vram_mb} MB free, threshold: {vram_threshold_mb} MB "
-        f"({vram_threshold_gb} GB)"
-    )
+    logger.info(f"Model: {current_model}, OCR method: {ocr_method}")
 
-    if has_sufficient_vram and free_vram_mb >= vram_threshold_mb:
+    if ocr_method == "deepseek-ocr":
         # Use DeepSeek-OCR
-        logger.info("Sufficient VRAM available, using DeepSeek-OCR")
-        return process_with_deepseek_ocr(pdf_path, output_format)
+        logger.info(f"Routing to DeepSeek-OCR based on config for {current_model}")
+        try:
+            return process_with_deepseek_ocr(pdf_path, output_format)
+        except Exception as e:
+            # DeepSeek-OCR failed - this is a general error (Exit 1)
+            logger.error(f"DeepSeek-OCR failed: {e}")
+            raise
     else:
-        # Check if current model supports multimodal
-        logger.info("Insufficient VRAM for DeepSeek-OCR, checking current model")
-        current_model = get_current_model(base_url)
+        # Use current model - check if it supports vision
+        logger.info(f"Routing to current model based on config for {current_model}")
 
-        if current_model and check_multimodal_support(base_url, current_model):
-            # Use current multimodal model
-            logger.info(f"Using current multimodal model: {current_model}")
+        if check_multimodal_support(base_url, current_model):
             return process_with_current_model(
                 pdf_path, output_format, current_model, base_url
             )
         else:
-            # Exit with code 3
+            # Current model doesn't support vision - Exit 3
             error_msg = (
-                f"INSUFFICIENT_VRAM_NO_MULTIMODAL: DeepSeek-OCR requires ~{vram_threshold_gb}GB VRAM "
-                f"but only {free_vram_mb // 1024} GB available. "
-                f"Current model '{current_model}' does not support multimodal/vision capabilities."
+                f"NO_OCR_SUPPORT: Model '{current_model}' is configured to use "
+                f"current_model for OCR but does not support multimodal/vision capabilities. "
+                f"Add '{current_model}' to ocr_routing.json with 'deepseek-ocr' value "
+                f"to use DeepSeek-OCR instead."
             )
             logger.error(error_msg)
             print(error_msg, file=sys.stderr)

@@ -2,101 +2,119 @@
 import unittest
 import tempfile
 import os
-import subprocess
+import json
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, mock_open
 import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "pdf-ocr" / "tool"))
 import pdf_ocr_backend
 
 
-class TestVRAMDetection(unittest.TestCase):
-    """Unit tests for VRAM detection functionality."""
+class TestOCRRoutingConfig(unittest.TestCase):
+    """Unit tests for OCR routing configuration functionality."""
 
-    @patch("pdf_ocr_backend.subprocess.run")
-    def test_check_vram_single_gpu(self, mock_subprocess):
-        """Test VRAM detection with a single GPU."""
-        mock_result = MagicMock()
-        mock_result.stdout = "16384\n"
-        mock_result.stderr = ""
-        mock_subprocess.return_value = mock_result
-
-        has_sufficient, free_mb = pdf_ocr_backend.check_vram_availability()
-
-        self.assertTrue(has_sufficient)
-        self.assertEqual(free_mb, 16384)
-        mock_subprocess.assert_called_once()
-
-    @patch("pdf_ocr_backend.subprocess.run")
-    def test_check_vram_multiple_gpus(self, mock_subprocess):
-        """Test VRAM detection with multiple GPUs."""
-        mock_result = MagicMock()
-        mock_result.stdout = "8192\n8192\n"
-        mock_result.stderr = ""
-        mock_subprocess.return_value = mock_result
-
-        has_sufficient, free_mb = pdf_ocr_backend.check_vram_availability()
-
-        self.assertTrue(has_sufficient)
-        self.assertEqual(free_mb, 16384)
-
-    @patch("pdf_ocr_backend.subprocess.run")
-    def test_check_vram_zero_memory(self, mock_subprocess):
-        """Test VRAM detection with zero free memory."""
-        mock_result = MagicMock()
-        mock_result.stdout = "0\n"
-        mock_result.stderr = ""
-        mock_subprocess.return_value = mock_result
-
-        has_sufficient, free_mb = pdf_ocr_backend.check_vram_availability()
-
-        self.assertFalse(has_sufficient)
-        self.assertEqual(free_mb, 0)
-
-    @patch("pdf_ocr_backend.subprocess.run")
-    def test_check_vram_command_failure(self, mock_subprocess):
-        """Test VRAM detection when nvidia-smi fails."""
-        mock_subprocess.side_effect = subprocess.CalledProcessError(
-            returncode=1, cmd="nvidia-smi", stderr="Command failed"
+    def test_load_ocr_routing_config_existing_valid(self):
+        """Test loading existing valid config file."""
+        config_content = json.dumps(
+            {"ocr_routing": {"test-model": "deepseek-ocr"}, "default": "current_model"}
         )
 
-        with self.assertRaises(subprocess.CalledProcessError):
-            pdf_ocr_backend.check_vram_availability()
+        with patch("builtins.open", mock_open(read_data=config_content)):
+            with patch.object(Path, "exists", return_value=True):
+                result = pdf_ocr_backend.load_ocr_routing_config(Path("/fake/path"))
 
-    @patch("pdf_ocr_backend.subprocess.run")
-    def test_check_vram_not_found(self, mock_subprocess):
-        """Test VRAM detection when nvidia-smi is not found."""
-        mock_subprocess.side_effect = FileNotFoundError("nvidia-smi not found")
+        self.assertEqual(result["ocr_routing"]["test-model"], "deepseek-ocr")
+        self.assertEqual(result["default"], "current_model")
 
-        with self.assertRaises(FileNotFoundError):
-            pdf_ocr_backend.check_vram_availability()
+    def test_load_ocr_routing_config_nonexistent(self):
+        """Test loading non-existent config file returns defaults."""
+        with patch.object(Path, "exists", return_value=False):
+            result = pdf_ocr_backend.load_ocr_routing_config(Path("/fake/path"))
 
-    @patch("pdf_ocr_backend.subprocess.run")
-    def test_check_vram_empty_output(self, mock_subprocess):
-        """Test VRAM detection with empty output."""
-        mock_result = MagicMock()
-        mock_result.stdout = ""
-        mock_result.stderr = ""
-        mock_subprocess.return_value = mock_result
+        self.assertEqual(result["ocr_routing"], {})
+        self.assertEqual(result["default"], "current_model")
 
-        has_sufficient, free_mb = pdf_ocr_backend.check_vram_availability()
+    def test_load_ocr_routing_config_invalid_json(self):
+        """Test loading invalid JSON returns defaults."""
+        with patch("builtins.open", mock_open(read_data="invalid json")):
+            with patch.object(Path, "exists", return_value=True):
+                result = pdf_ocr_backend.load_ocr_routing_config(Path("/fake/path"))
 
-        self.assertFalse(has_sufficient)
-        self.assertEqual(free_mb, 0)
+        self.assertEqual(result["ocr_routing"], {})
+        self.assertEqual(result["default"], "current_model")
 
-    @patch("pdf_ocr_backend.subprocess.run")
-    def test_check_vram_malformed_output(self, mock_subprocess):
-        """Test VRAM detection with malformed output."""
-        mock_result = MagicMock()
-        mock_result.stdout = "invalid\n8192\n"
-        mock_result.stderr = ""
-        mock_subprocess.return_value = mock_result
+    def test_load_ocr_routing_config_missing_ocr_routing_key(self):
+        """Test config with missing ocr_routing key gets default."""
+        config_content = json.dumps({"default": "deepseek-ocr"})
 
-        has_sufficient, free_mb = pdf_ocr_backend.check_vram_availability()
+        with patch("builtins.open", mock_open(read_data=config_content)):
+            with patch.object(Path, "exists", return_value=True):
+                result = pdf_ocr_backend.load_ocr_routing_config(Path("/fake/path"))
 
-        self.assertTrue(has_sufficient)
-        self.assertEqual(free_mb, 8192)
+        self.assertEqual(result["ocr_routing"], {})
+        self.assertEqual(result["default"], "deepseek-ocr")
+
+    def test_load_ocr_routing_config_missing_default_key(self):
+        """Test config with missing default key gets default."""
+        config_content = json.dumps({"ocr_routing": {"model": "deepseek-ocr"}})
+
+        with patch("builtins.open", mock_open(read_data=config_content)):
+            with patch.object(Path, "exists", return_value=True):
+                result = pdf_ocr_backend.load_ocr_routing_config(Path("/fake/path"))
+
+        self.assertEqual(result["default"], "current_model")
+
+    def test_get_ocr_method_for_model_exact_match(self):
+        """Test exact model match in routing config."""
+        config = {
+            "ocr_routing": {"ik_llama.cpp/kimi-k2.5": "deepseek-ocr"},
+            "default": "current_model",
+        }
+
+        result = pdf_ocr_backend.get_ocr_method_for_model(
+            "ik_llama.cpp/kimi-k2.5", config
+        )
+        self.assertEqual(result, "deepseek-ocr")
+
+    def test_get_ocr_method_for_model_partial_match_pattern_in_model(self):
+        """Test partial match where pattern is contained in model_id."""
+        config = {
+            "ocr_routing": {"kimi-k2.5": "deepseek-ocr"},
+            "default": "current_model",
+        }
+
+        result = pdf_ocr_backend.get_ocr_method_for_model(
+            "ik_llama.cpp/kimi-k2.5-experimental", config
+        )
+        self.assertEqual(result, "deepseek-ocr")
+
+    def test_get_ocr_method_for_model_partial_match_model_in_pattern(self):
+        """Test partial match where model_id is contained in pattern."""
+        config = {
+            "ocr_routing": {"ik_llama.cpp/kimi-k2.5-experimental": "deepseek-ocr"},
+            "default": "current_model",
+        }
+
+        result = pdf_ocr_backend.get_ocr_method_for_model("kimi-k2.5", config)
+        self.assertEqual(result, "deepseek-ocr")
+
+    def test_get_ocr_method_for_model_no_match_returns_default(self):
+        """Test no match returns default method."""
+        config = {
+            "ocr_routing": {"other-model": "deepseek-ocr"},
+            "default": "current_model",
+        }
+
+        result = pdf_ocr_backend.get_ocr_method_for_model("unknown-model", config)
+        self.assertEqual(result, "current_model")
+
+    def test_get_ocr_method_for_model_empty_config(self):
+        """Test empty config returns default method."""
+        config = {"ocr_routing": {}, "default": "current_model"}
+
+        result = pdf_ocr_backend.get_ocr_method_for_model("any-model", config)
+        self.assertEqual(result, "current_model")
 
 
 class TestModelDetection(unittest.TestCase):
@@ -257,28 +275,18 @@ class TestModelRouter(unittest.TestCase):
         self.assertEqual(template["extra_body"], None)
 
     @patch("pdf_ocr_backend.process_with_deepseek_ocr")
+    @patch("pdf_ocr_backend.load_ocr_routing_config")
+    @patch("pdf_ocr_backend.get_current_model")
     @patch.dict(os.environ, {"DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1"})
-    def test_route_ocr_request_no_vram_check(self, mock_process):
-        """Test route_ocr_request works when only DEEPSEEK_OCR_BASE_URL is set."""
-        mock_process.return_value = "OCR result"
-
-        result = pdf_ocr_backend.route_ocr_request(self.test_pdf, "markdown")
-
-        self.assertEqual(result, "OCR result")
-        mock_process.assert_called_once_with(self.test_pdf, "markdown")
-
-    @patch("pdf_ocr_backend.process_with_deepseek_ocr")
-    @patch("pdf_ocr_backend.check_vram_availability")
-    @patch.dict(
-        os.environ,
-        {
-            "DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1",
-            "PDF_OCR_VRAM_THRESHOLD_GB": "17",
-        },
-    )
-    def test_route_ocr_request_sufficient_vram(self, mock_vram, mock_process):
-        """Test route_ocr_request uses DeepSeek-OCR when VRAM is sufficient."""
-        mock_vram.return_value = (True, 20480)  # 20 GB free
+    def test_route_ocr_request_deepseek_ocr_configured_success(
+        self, mock_get_model, mock_load_config, mock_process
+    ):
+        """Test routing to DeepSeek-OCR when configured and successful."""
+        mock_get_model.return_value = "test-model"
+        mock_load_config.return_value = {
+            "ocr_routing": {"test-model": "deepseek-ocr"},
+            "default": "current_model",
+        }
         mock_process.return_value = "DeepSeek OCR result"
 
         result = pdf_ocr_backend.route_ocr_request(self.test_pdf, "markdown")
@@ -286,23 +294,40 @@ class TestModelRouter(unittest.TestCase):
         self.assertEqual(result, "DeepSeek OCR result")
         mock_process.assert_called_once_with(self.test_pdf, "markdown")
 
+    @patch("pdf_ocr_backend.process_with_deepseek_ocr")
+    @patch("pdf_ocr_backend.load_ocr_routing_config")
+    @patch("pdf_ocr_backend.get_current_model")
+    @patch.dict(os.environ, {"DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1"})
+    def test_route_ocr_request_deepseek_ocr_configured_failure(
+        self, mock_get_model, mock_load_config, mock_process
+    ):
+        """Test routing to DeepSeek-OCR when configured but fails (Exit 1)."""
+        mock_get_model.return_value = "test-model"
+        mock_load_config.return_value = {
+            "ocr_routing": {"test-model": "deepseek-ocr"},
+            "default": "current_model",
+        }
+        mock_process.side_effect = Exception("DeepSeek-OCR failed")
+
+        with self.assertRaises(Exception) as cm:
+            pdf_ocr_backend.route_ocr_request(self.test_pdf, "markdown")
+
+        self.assertIn("DeepSeek-OCR failed", str(cm.exception))
+
     @patch("pdf_ocr_backend.process_with_current_model")
     @patch("pdf_ocr_backend.check_multimodal_support")
+    @patch("pdf_ocr_backend.load_ocr_routing_config")
     @patch("pdf_ocr_backend.get_current_model")
-    @patch("pdf_ocr_backend.check_vram_availability")
-    @patch.dict(
-        os.environ,
-        {
-            "DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1",
-            "PDF_OCR_VRAM_THRESHOLD_GB": "17",
-        },
-    )
-    def test_route_ocr_request_insufficient_vram_multimodal_available(
-        self, mock_vram, mock_get_model, mock_multimodal, mock_process
+    @patch.dict(os.environ, {"DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1"})
+    def test_route_ocr_request_current_model_with_vision(
+        self, mock_get_model, mock_load_config, mock_multimodal, mock_process
     ):
-        """Test route_ocr_request uses current model when VRAM insufficient but model supports vision."""
-        mock_vram.return_value = (True, 8192)  # 8 GB free (< 17 GB threshold)
+        """Test routing to current model with vision support (Exit 0)."""
         mock_get_model.return_value = "qwen-vl"
+        mock_load_config.return_value = {
+            "ocr_routing": {"qwen-vl": "current_model"},
+            "default": "current_model",
+        }
         mock_multimodal.return_value = True
         mock_process.return_value = "Current model OCR result"
 
@@ -314,21 +339,18 @@ class TestModelRouter(unittest.TestCase):
         )
 
     @patch("pdf_ocr_backend.check_multimodal_support")
+    @patch("pdf_ocr_backend.load_ocr_routing_config")
     @patch("pdf_ocr_backend.get_current_model")
-    @patch("pdf_ocr_backend.check_vram_availability")
-    @patch.dict(
-        os.environ,
-        {
-            "DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1",
-            "PDF_OCR_VRAM_THRESHOLD_GB": "17",
-        },
-    )
-    def test_route_ocr_request_insufficient_vram_no_multimodal(
-        self, mock_vram, mock_get_model, mock_multimodal
+    @patch.dict(os.environ, {"DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1"})
+    def test_route_ocr_request_current_model_no_vision_exit_3(
+        self, mock_get_model, mock_load_config, mock_multimodal
     ):
-        """Test route_ocr_request exits with code 3 when VRAM insufficient and no multimodal support."""
-        mock_vram.return_value = (True, 8192)  # 8 GB free
+        """Test routing to current model without vision support (Exit 3)."""
         mock_get_model.return_value = "text-only-model"
+        mock_load_config.return_value = {
+            "ocr_routing": {"text-only-model": "current_model"},
+            "default": "current_model",
+        }
         mock_multimodal.return_value = False
 
         with self.assertRaises(SystemExit) as cm:
@@ -336,60 +358,59 @@ class TestModelRouter(unittest.TestCase):
 
         self.assertEqual(cm.exception.code, 3)
 
-    @patch("pdf_ocr_backend.process_with_deepseek_ocr")
-    @patch("pdf_ocr_backend.check_vram_availability")
-    @patch.dict(
-        os.environ,
-        {
-            "DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1",
-        },
-    )
-    def test_route_ocr_request_default_threshold(self, mock_vram, mock_process):
-        """Test route_ocr_request uses default threshold of 17 GB."""
-        mock_vram.return_value = (True, 18432)  # 18 GB free (> 17 GB default)
+    @patch("pdf_ocr_backend.process_with_current_model")
+    @patch("pdf_ocr_backend.check_multimodal_support")
+    @patch("pdf_ocr_backend.load_ocr_routing_config")
+    @patch("pdf_ocr_backend.get_current_model")
+    @patch.dict(os.environ, {"DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1"})
+    def test_route_ocr_request_model_not_in_config_with_vision(
+        self, mock_get_model, mock_load_config, mock_multimodal, mock_process
+    ):
+        """Test routing when model not in config but has vision support."""
+        mock_get_model.return_value = "new-model"
+        mock_load_config.return_value = {"ocr_routing": {}, "default": "current_model"}
+        mock_multimodal.return_value = True
         mock_process.return_value = "OCR result"
 
         result = pdf_ocr_backend.route_ocr_request(self.test_pdf, "markdown")
 
         self.assertEqual(result, "OCR result")
-        mock_process.assert_called_once_with(self.test_pdf, "markdown")
 
-    @patch("pdf_ocr_backend.process_with_deepseek_ocr")
-    @patch("pdf_ocr_backend.check_vram_availability")
-    @patch.dict(
-        os.environ,
-        {
-            "DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1",
-            "PDF_OCR_VRAM_THRESHOLD_GB": "invalid",
-        },
-    )
-    def test_route_ocr_request_invalid_threshold(self, mock_vram, mock_process):
-        """Test route_ocr_request handles invalid threshold value gracefully."""
-        mock_vram.return_value = (True, 18432)  # 18 GB free
-        mock_process.return_value = "OCR result"
+    @patch("pdf_ocr_backend.check_multimodal_support")
+    @patch("pdf_ocr_backend.load_ocr_routing_config")
+    @patch("pdf_ocr_backend.get_current_model")
+    @patch.dict(os.environ, {"DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1"})
+    def test_route_ocr_request_model_not_in_config_no_vision_exit_3(
+        self, mock_get_model, mock_load_config, mock_multimodal
+    ):
+        """Test routing when model not in config and no vision support (Exit 3)."""
+        mock_get_model.return_value = "text-model"
+        mock_load_config.return_value = {"ocr_routing": {}, "default": "current_model"}
+        mock_multimodal.return_value = False
 
-        result = pdf_ocr_backend.route_ocr_request(self.test_pdf, "markdown")
+        with self.assertRaises(SystemExit) as cm:
+            pdf_ocr_backend.route_ocr_request(self.test_pdf, "markdown")
 
-        self.assertEqual(result, "OCR result")
-        mock_process.assert_called_once_with(self.test_pdf, "markdown")
+        self.assertEqual(cm.exception.code, 3)
 
-    @patch("pdf_ocr_backend.process_with_deepseek_ocr")
-    @patch("pdf_ocr_backend.check_vram_availability")
-    @patch.dict(
-        os.environ,
-        {
-            "DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1",
-        },
-    )
-    def test_route_ocr_request_vram_check_failure(self, mock_vram, mock_process):
-        """Test route_ocr_request falls back to DeepSeek-OCR when VRAM check fails."""
-        mock_vram.side_effect = Exception("nvidia-smi not found")
-        mock_process.return_value = "OCR result"
+    @patch.dict(os.environ, {}, clear=True)
+    def test_route_ocr_request_no_base_url(self):
+        """Test route_ocr_request when DEEPSEEK_OCR_BASE_URL not set."""
+        with self.assertRaises(Exception) as cm:
+            pdf_ocr_backend.route_ocr_request(self.test_pdf, "markdown")
 
-        result = pdf_ocr_backend.route_ocr_request(self.test_pdf, "markdown")
+        self.assertIn("DEEPSEEK_OCR_BASE_URL not set", str(cm.exception))
 
-        self.assertEqual(result, "OCR result")
-        mock_process.assert_called_once_with(self.test_pdf, "markdown")
+    @patch("pdf_ocr_backend.get_current_model")
+    @patch.dict(os.environ, {"DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1"})
+    def test_route_ocr_request_no_model_loaded(self, mock_get_model):
+        """Test route_ocr_request when no model is loaded."""
+        mock_get_model.return_value = None
+
+        with self.assertRaises(Exception) as cm:
+            pdf_ocr_backend.route_ocr_request(self.test_pdf, "markdown")
+
+        self.assertIn("No model currently loaded", str(cm.exception))
 
 
 class TestPDFOCRBackend(unittest.TestCase):
@@ -402,9 +423,19 @@ class TestPDFOCRBackend(unittest.TestCase):
 
         shutil.rmtree(self.temp_dir)
 
+    @patch("pdf_ocr_backend.process_with_deepseek_ocr")
+    @patch("pdf_ocr_backend.load_ocr_routing_config")
+    @patch("pdf_ocr_backend.get_current_model")
     @patch("pdf_ocr_backend.fitz.open")
     @patch("pdf_ocr_backend.OpenAI")
-    def test_main_with_valid_pdf(self, mock_openai, mock_fitz_open):
+    def test_main_with_valid_pdf(
+        self,
+        mock_openai,
+        mock_fitz_open,
+        mock_get_model,
+        mock_load_config,
+        mock_process,
+    ):
         mock_doc = MagicMock()
         mock_doc.page_count = 1
         mock_page = MagicMock()
@@ -420,6 +451,13 @@ class TestPDFOCRBackend(unittest.TestCase):
         mock_response.choices[0].message.content = "Extracted text"
         mock_client.chat.completions.create.return_value = mock_response
         mock_openai.return_value = mock_client
+
+        mock_get_model.return_value = "test-model"
+        mock_load_config.return_value = {
+            "ocr_routing": {"test-model": "deepseek-ocr"},
+            "default": "current_model",
+        }
+        mock_process.return_value = "Extracted text"
 
         with patch("sys.argv", ["pdf_ocr_backend.py", self.test_pdf, "markdown"]):
             with patch("builtins.print") as mock_print:
@@ -479,9 +517,19 @@ class TestPDFOCRBackend(unittest.TestCase):
                         pdf_ocr_backend.main()
                     self.assertEqual(cm.exception.code, 1)
 
+    @patch("pdf_ocr_backend.process_with_deepseek_ocr")
+    @patch("pdf_ocr_backend.load_ocr_routing_config")
+    @patch("pdf_ocr_backend.get_current_model")
     @patch("pdf_ocr_backend.fitz.open")
     @patch("pdf_ocr_backend.OpenAI")
-    def test_main_default_output_format(self, mock_openai, mock_fitz_open):
+    def test_main_default_output_format(
+        self,
+        mock_openai,
+        mock_fitz_open,
+        mock_get_model,
+        mock_load_config,
+        mock_process,
+    ):
         mock_doc = MagicMock()
         mock_doc.page_count = 1
         mock_page = MagicMock()
@@ -498,6 +546,13 @@ class TestPDFOCRBackend(unittest.TestCase):
         mock_client.chat.completions.create.return_value = mock_response
         mock_openai.return_value = mock_client
 
+        mock_get_model.return_value = "test-model"
+        mock_load_config.return_value = {
+            "ocr_routing": {"test-model": "deepseek-ocr"},
+            "default": "current_model",
+        }
+        mock_process.return_value = "Default format text"
+
         with patch("sys.argv", ["pdf_ocr_backend.py", self.test_pdf]):
             with patch("builtins.print"):
                 with patch.object(Path, "exists", return_value=True):
@@ -506,7 +561,7 @@ class TestPDFOCRBackend(unittest.TestCase):
                     ):
                         pdf_ocr_backend.main()
 
-        mock_client.chat.completions.create.assert_called_once()
+        mock_process.assert_called_once()
 
     @patch("builtins.print")
     @patch("pdf_ocr_backend.fitz.open")
@@ -526,6 +581,71 @@ class TestPDFOCRBackend(unittest.TestCase):
         self.assertTrue(
             any("DEEPSEEK_OCR_BASE_URL not set" in str(call) for call in calls)
         )
+
+
+class TestExitCode3(unittest.TestCase):
+    """Unit tests for Exit 3 (NO_OCR_SUPPORT) scenarios."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.test_pdf = os.path.join(self.temp_dir, "test.pdf")
+
+    def tearDown(self):
+        import shutil
+
+        shutil.rmtree(self.temp_dir)
+
+    @patch("pdf_ocr_backend.check_multimodal_support")
+    @patch("pdf_ocr_backend.load_ocr_routing_config")
+    @patch("pdf_ocr_backend.get_current_model")
+    @patch.dict(os.environ, {"DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1"})
+    def test_exit_3_only_when_current_model_configured_no_vision(
+        self, mock_get_model, mock_load_config, mock_multimodal
+    ):
+        """Verify Exit 3 only occurs when current_model configured but no vision support."""
+        mock_get_model.return_value = "text-model"
+        mock_load_config.return_value = {
+            "ocr_routing": {"text-model": "current_model"},
+            "default": "current_model",
+        }
+        mock_multimodal.return_value = False
+
+        with self.assertRaises(SystemExit) as cm:
+            pdf_ocr_backend.route_ocr_request(self.test_pdf, "markdown")
+
+        self.assertEqual(cm.exception.code, 3)
+
+    @patch("pdf_ocr_backend.check_multimodal_support")
+    @patch("pdf_ocr_backend.load_ocr_routing_config")
+    @patch("pdf_ocr_backend.get_current_model")
+    @patch.dict(os.environ, {"DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1"})
+    def test_exit_3_error_message_format(
+        self, mock_get_model, mock_load_config, mock_multimodal
+    ):
+        """Verify error message includes model name and configuration instructions."""
+        mock_get_model.return_value = "my-text-model"
+        mock_load_config.return_value = {
+            "ocr_routing": {"my-text-model": "current_model"},
+            "default": "current_model",
+        }
+        mock_multimodal.return_value = False
+
+        with patch("sys.stderr") as mock_stderr:
+            with self.assertRaises(SystemExit):
+                pdf_ocr_backend.route_ocr_request(self.test_pdf, "markdown")
+
+            # Check that error message was printed to stderr
+            mock_stderr.write.assert_called()
+            error_output = ""
+            for call in mock_stderr.write.call_args_list:
+                args = call[0]
+                if args:
+                    error_output += str(args[0])
+
+            self.assertIn("NO_OCR_SUPPORT", error_output)
+            self.assertIn("my-text-model", error_output)
+            self.assertIn("ocr_routing.json", error_output)
+            self.assertIn("deepseek-ocr", error_output)
 
 
 if __name__ == "__main__":

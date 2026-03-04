@@ -66,6 +66,9 @@ cp "$REPO_DIR/pdf-ocr/tool/pdf-ocr.ts" "$TOOL_DIR/"
 cp "$REPO_DIR/pdf-ocr/tool/pdf_ocr_backend.py" "$TOOL_DIR/"
 cp "$REPO_DIR/pdf-ocr/pyproject.toml" "$TOOL_DIR/"
 
+# Copy routing config to tool directory (same location as pdf_ocr_backend.py)
+cp "$REPO_DIR/pdf-ocr/tool/ocr_routing.json" "$TOOL_DIR/"
+
 # Make Python script executable
 chmod +x "$TOOL_DIR/pdf_ocr_backend.py"
 
@@ -91,17 +94,30 @@ if [ ! -f "$ENV_FILE" ]; then
     
     echo "DEEPSEEK_OCR_BASE_URL=\"$ENDPOINT\"" > "$ENV_FILE"
     
-    # Prompt for VRAM threshold
-    echo ""
-    read -p "Enter VRAM threshold in GB for DeepSeek-OCR [default: 17]: " VRAM_THRESHOLD
-    
-    if [ -z "$VRAM_THRESHOLD" ]; then
-        VRAM_THRESHOLD="17"
-    fi
-    
-    echo "PDF_OCR_VRAM_THRESHOLD_GB=\"$VRAM_THRESHOLD\"" >> "$ENV_FILE"
-    
     echo ".env file created at $ENV_FILE"
+    
+    # Create OCR routing configuration
+    ROUTING_CONFIG="$TOOL_DIR/ocr_routing.json"
+    if [ ! -f "$ROUTING_CONFIG" ]; then
+        echo ""
+        echo "Creating OCR routing configuration..."
+        echo "This file maps models to their preferred OCR method."
+        
+        cat > "$ROUTING_CONFIG" << 'EOF'
+{
+  "_comment": "OCR Routing Configuration - Maps model IDs to preferred OCR method",
+  "_routing_options": {
+    "deepseek-ocr": "Use DeepSeek-OCR model (requires sufficient VRAM)",
+    "current_model": "Use the currently loaded model (requires vision support)"
+  },
+  "ocr_routing": {},
+  "default": "current_model"
+}
+EOF
+        
+        echo "Created default routing config at $ROUTING_CONFIG"
+        echo "Edit this file to enable DeepSeek-OCR for specific models."
+    fi
 else
     echo ".env file already exists at $ENV_FILE"
 fi
