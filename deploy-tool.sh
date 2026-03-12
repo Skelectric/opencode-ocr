@@ -7,7 +7,7 @@ set -euo pipefail
 #   --force    Force reinstallation even if already installed
 #   --repo <path>  Specify custom repository path (default: ~/opencode-ocr)
 
-REPO_DIR="$HOME/opencode-ocr"
+REPO_DIR="."
 TOOL_DIR="$HOME/.config/opencode/tool"
 FORCE=false
 

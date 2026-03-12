@@ -203,20 +203,92 @@ def get_prompt_template(model_id: str) -> dict:
     return PROMPT_TEMPLATES["default_multimodal"]
 
 
+def parse_page_spec(page_spec: Optional[str], total_pages: int) -> list:
+    """
+    Parse a page specification string into a list of 0-based page indices.
+
+    Supports formats:
+    - Single page: "5"
+    - Page range: "1-5"
+    - Multiple pages: "1,3,5"
+    - Mixed: "1-3,5,7-9"
+
+    Args:
+        page_spec: The page specification string
+        total_pages: Total number of pages in the document
+
+    Returns:
+        list: List of 0-based page indices
+
+    Raises:
+        ValueError: If the page specification is invalid
+    """
+    if not page_spec:
+        return list(range(total_pages))
+
+    pages = set()
+    parts = page_spec.split(",")
+
+    for part in parts:
+        part = part.strip()
+        if "-" in part:
+            # Range specification
+            range_parts = part.split("-")
+            if len(range_parts) != 2:
+                raise ValueError(f"Invalid range specification: {part}")
+            try:
+                start = int(range_parts[0].strip())
+                end = int(range_parts[1].strip())
+            except ValueError:
+                raise ValueError(f"Invalid page numbers in range: {part}")
+
+            if start < 1 or end < 1:
+                raise ValueError(f"Page numbers must be positive: {part}")
+            if start > end:
+                raise ValueError(f"Invalid range (start > end): {part}")
+            if start > total_pages or end > total_pages:
+                raise ValueError(
+                    f"Page number exceeds document length ({total_pages} pages): {part}"
+                )
+
+            # Convert to 0-based indices
+            for page_num in range(start, end + 1):
+                pages.add(page_num - 1)
+        else:
+            # Single page
+            try:
+                page_num = int(part)
+            except ValueError:
+                raise ValueError(f"Invalid page number: {part}")
+
+            if page_num < 1:
+                raise ValueError(f"Page number must be positive: {page_num}")
+            if page_num > total_pages:
+                raise ValueError(
+                    f"Page number {page_num} exceeds document length ({total_pages} pages)"
+                )
+
+            pages.add(page_num - 1)
+
+    return sorted(list(pages))
+
+
 def process_pdf_pages(
     doc: fitz.Document,
     client: OpenAI,
     model_id: str,
     prompt_template: dict,
+    page_indices: Optional[list] = None,
 ) -> list:
     """
-    Process all pages in a PDF document using the specified model and prompt template.
+    Process pages in a PDF document using the specified model and prompt template.
 
     Args:
         doc: The PDF document object
         client: The OpenAI client instance
         model_id: The model identifier to use
         prompt_template: The prompt template with system, user, and extra_body
+        page_indices: List of 0-based page indices to process. If None, all pages are processed.
 
     Returns:
         list: List of extracted text for each page
@@ -226,7 +298,10 @@ def process_pdf_pages(
     user_prompt = prompt_template["user"]
     extra_body = prompt_template.get("extra_body")
 
-    for page_num in range(doc.page_count):
+    if page_indices is None:
+        page_indices = list(range(doc.page_count))
+
+    for page_num in page_indices:
         page = doc[page_num]
         pix = page.get_pixmap(dpi=144, colorspace=fitz.csRGB)
         img_bytes = pix.tobytes("png")
@@ -273,13 +348,16 @@ def process_pdf_pages(
     return results
 
 
-def process_with_deepseek_ocr(pdf_path: str, output_format: str) -> str:
+def process_with_deepseek_ocr(
+    pdf_path: str, output_format: str, page_indices: Optional[list] = None
+) -> str:
     """
     Process PDF using DeepSeek-OCR model.
 
     Args:
         pdf_path: Path to the PDF file
         output_format: Output format (markdown or text)
+        page_indices: List of 0-based page indices to process. If None, all pages are processed.
 
     Returns:
         str: Extracted text from the PDF
@@ -306,7 +384,9 @@ def process_with_deepseek_ocr(pdf_path: str, output_format: str) -> str:
         client = OpenAI(api_key="EMPTY", base_url=deepseek_url, timeout=3600)
         prompt_template = get_prompt_template("deepseek-ocr")
 
-        results = process_pdf_pages(doc, client, "deepseek-ocr", prompt_template)
+        results = process_pdf_pages(
+            doc, client, "deepseek-ocr", prompt_template, page_indices
+        )
 
         output = "\n\n".join(results)
         return output
@@ -317,7 +397,11 @@ def process_with_deepseek_ocr(pdf_path: str, output_format: str) -> str:
 
 
 def process_with_current_model(
-    pdf_path: str, output_format: str, model_id: str, base_url: str
+    pdf_path: str,
+    output_format: str,
+    model_id: str,
+    base_url: str,
+    page_indices: Optional[list] = None,
 ) -> str:
     """
     Process PDF using the currently loaded multimodal model.
@@ -327,6 +411,7 @@ def process_with_current_model(
         output_format: Output format (markdown or text)
         model_id: The ID of the currently loaded model
         base_url: Base URL for the API endpoint
+        page_indices: List of 0-based page indices to process. If None, all pages are processed.
 
     Returns:
         str: Extracted text from the PDF
@@ -347,7 +432,9 @@ def process_with_current_model(
         client = OpenAI(api_key="EMPTY", base_url=upstream_url, timeout=3600)
         prompt_template = get_prompt_template(model_id)
 
-        results = process_pdf_pages(doc, client, model_id, prompt_template)
+        results = process_pdf_pages(
+            doc, client, model_id, prompt_template, page_indices
+        )
 
         output = "\n\n".join(results)
         return output
@@ -423,13 +510,16 @@ def get_ocr_method_for_model(model_id: str, config: dict) -> str:
     return default
 
 
-def route_ocr_request(pdf_path: str, output_format: str) -> str:
+def route_ocr_request(
+    pdf_path: str, output_format: str, page_spec: Optional[str] = None
+) -> str:
     """
     Route OCR request based on model-based configuration.
 
     Args:
         pdf_path: Path to the PDF file
         output_format: Output format (markdown or text)
+        page_spec: Page specification string (e.g., "1-5", "1,3,5"). If None, all pages are processed.
 
     Returns:
         str: OCR result text
@@ -456,11 +546,18 @@ def route_ocr_request(pdf_path: str, output_format: str) -> str:
 
     logger.info(f"Model: {current_model}, OCR method: {ocr_method}")
 
+    # Parse page specification
+    doc = fitz.open(pdf_path)
+    try:
+        page_indices = parse_page_spec(page_spec, doc.page_count)
+    finally:
+        doc.close()
+
     if ocr_method == "deepseek-ocr":
         # Use DeepSeek-OCR
         logger.info(f"Routing to DeepSeek-OCR based on config for {current_model}")
         try:
-            return process_with_deepseek_ocr(pdf_path, output_format)
+            return process_with_deepseek_ocr(pdf_path, output_format, page_indices)
         except Exception as e:
             # DeepSeek-OCR failed - this is a general error (Exit 1)
             logger.error(f"DeepSeek-OCR failed: {e}")
@@ -471,7 +568,7 @@ def route_ocr_request(pdf_path: str, output_format: str) -> str:
 
         if check_multimodal_support(base_url, current_model):
             return process_with_current_model(
-                pdf_path, output_format, current_model, base_url
+                pdf_path, output_format, current_model, base_url, page_indices
             )
         else:
             # Current model doesn't support vision - Exit 3
@@ -495,6 +592,10 @@ def main():
         default="markdown",
         choices=["markdown", "text"],
         help="Output format (default: markdown)",
+    )
+    parser.add_argument(
+        "--page",
+        help="Page(s) to OCR: single page ('5'), range ('1-5'), multiple ('1,3,5'), or mixed ('1-3,5,7-9'). If omitted, all pages are processed.",
     )
     parser.add_argument(
         "--base-url",
@@ -521,7 +622,7 @@ def main():
 
     try:
         # Use the new routing system
-        output = route_ocr_request(pdf_path, args.output_format)
+        output = route_ocr_request(pdf_path, args.output_format, args.page)
         print(output)
     except Exception as e:
         print(f"Error processing PDF: {e}")
