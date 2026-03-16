@@ -349,7 +349,10 @@ def process_pdf_pages(
 
 
 def process_with_deepseek_ocr(
-    pdf_path: str, output_format: str, page_indices: Optional[list] = None
+    pdf_path: str,
+    output_format: str,
+    page_indices: Optional[list] = None,
+    model_name: str = "deepseek-ocr",
 ) -> str:
     """
     Process PDF using DeepSeek-OCR model.
@@ -358,6 +361,7 @@ def process_with_deepseek_ocr(
         pdf_path: Path to the PDF file
         output_format: Output format (markdown or text)
         page_indices: List of 0-based page indices to process. If None, all pages are processed.
+        model_name: The name of the DeepSeek-OCR model to use (e.g., "deepseek-ocr" or "deepseek-ocr-2")
 
     Returns:
         str: Extracted text from the PDF
@@ -371,7 +375,7 @@ def process_with_deepseek_ocr(
             "DEEPSEEK_OCR_BASE_URL not set. Set it via environment variable or .env file"
         )
 
-    logger.info(f"Processing PDF with DeepSeek-OCR: {pdf_path}")
+    logger.info(f"Processing PDF with {model_name}: {pdf_path}")
 
     doc = None
     try:
@@ -382,10 +386,10 @@ def process_with_deepseek_ocr(
         # DeepSeek-OCR needs the /v1 endpoint
         deepseek_url = base_url.rstrip("/") + "/v1"
         client = OpenAI(api_key="EMPTY", base_url=deepseek_url, timeout=3600)
-        prompt_template = get_prompt_template("deepseek-ocr")
+        prompt_template = get_prompt_template(model_name)
 
         results = process_pdf_pages(
-            doc, client, "deepseek-ocr", prompt_template, page_indices
+            doc, client, model_name, prompt_template, page_indices
         )
 
         output = "\n\n".join(results)
@@ -553,14 +557,16 @@ def route_ocr_request(
     finally:
         doc.close()
 
-    if ocr_method == "deepseek-ocr":
-        # Use DeepSeek-OCR
-        logger.info(f"Routing to DeepSeek-OCR based on config for {current_model}")
+    if ocr_method.startswith("deepseek-ocr"):
+        # Use DeepSeek-OCR (handles both "deepseek-ocr" and "deepseek-ocr-2")
+        logger.info(f"Routing to {ocr_method} based on config for {current_model}")
         try:
-            return process_with_deepseek_ocr(pdf_path, output_format, page_indices)
+            return process_with_deepseek_ocr(
+                pdf_path, output_format, page_indices, ocr_method
+            )
         except Exception as e:
             # DeepSeek-OCR failed - this is a general error (Exit 1)
-            logger.error(f"DeepSeek-OCR failed: {e}")
+            logger.error(f"{ocr_method} failed: {e}")
             raise
     else:
         # Use current model - check if it supports vision

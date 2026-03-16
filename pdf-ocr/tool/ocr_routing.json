@@ -2,11 +2,12 @@
   "_comment": "OCR Routing Configuration - Maps model IDs to preferred OCR method",
   "_routing_options": {
     "deepseek-ocr": "Use DeepSeek-OCR model (requires sufficient VRAM)",
+    "deepseek-ocr-2": "Use DeepSeek-OCR-2 model (requires sufficient VRAM)",
     "current_model": "Use the currently loaded model (requires vision support)"
   },
   "ocr_routing": {
-    "kimi-k2.5": "deepseek-ocr",
-    "kimi-k2.5-abliterated": "deepseek-ocr"
+    "kimi-k2.5": "deepseek-ocr-2",
+    "kimi-k2.5-abliterated": "deepseek-ocr-2"
   },
   "default": "current_model"
 }
