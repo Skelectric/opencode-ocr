@@ -59,6 +59,69 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def get_all_models(base_url: str) -> list:
+    """
+    Query llama-swap /running endpoint for all currently loaded models.
+
+    Args:
+        base_url: Base URL for the llama-swap endpoint
+
+    Returns:
+        list: List of model ID strings currently loaded (e.g.,
+              ["kimi-k2.6", "qwen3.6-35b-a3b-nvfp4"]).
+              Returns empty list if no models are loaded or on error.
+    """
+    try:
+        url = f"{base_url}/running"
+        logger.info(f"Querying all models from: {url}")
+
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+
+        data = response.json()
+        models = []
+
+        # Handle different response formats
+        if isinstance(data, list):
+            # List format - extract model from each item
+            for item in data:
+                model_id = item.get("model") or item.get("id")
+                if model_id:
+                    models.append(model_id)
+        elif isinstance(data, dict):
+            # Dict format: check for "running" key (llama-swap proxy)
+            if "running" in data and isinstance(data["running"], list):
+                for item in data["running"]:
+                    model_id = item.get("model") or item.get("id")
+                    if model_id:
+                        models.append(model_id)
+            # Direct dict format - check for model field
+            else:
+                model_id = data.get("model") or data.get("id")
+                if model_id:
+                    models.append(model_id)
+
+        if models:
+            logger.info(f"Loaded models detected: {models}")
+        else:
+            logger.warning("No models currently loaded")
+
+        return models
+
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"Connection failed to {base_url}/running: {e}")
+        return []
+    except requests.exceptions.Timeout:
+        logger.error(f"Timeout querying {base_url}/running")
+        return []
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Request failed: {e}")
+        return []
+    except (KeyError, ValueError) as e:
+        logger.error(f"Failed to parse response: {e}")
+        return []
+
+
 def get_current_model(base_url: str) -> Optional[str]:
     """
     Query ik_llama.cpp /running endpoint for currently loaded model.
@@ -69,56 +132,12 @@ def get_current_model(base_url: str) -> Optional[str]:
     Returns:
         Optional[str]: Model ID string if a model is loaded, None otherwise
     """
-    try:
-        url = f"{base_url}/running"
-        logger.info(f"Querying current model from: {url}")
-
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-
-        data = response.json()
-
-        # Handle different response formats
-        if isinstance(data, list) and len(data) > 0:
-            # List format - extract model from first item
-            model_id = data[0].get("model") or data[0].get("id")
-            if model_id:
-                logger.info(f"Current model detected: {model_id}")
-                return model_id
-        elif isinstance(data, dict):
-            # Dict format: check for "running" key (llama-swap proxy)
-            if (
-                "running" in data
-                and isinstance(data["running"], list)
-                and len(data["running"]) > 0
-            ):
-                model_id = data["running"][0].get("model") or data["running"][0].get(
-                    "id"
-                )
-                if model_id:
-                    logger.info(f"Current model detected: {model_id}")
-                    return model_id
-            # Direct dict format - check for model field
-            model_id = data.get("model") or data.get("id")
-            if model_id:
-                logger.info(f"Current model detected: {model_id}")
-                return model_id
-
-        logger.warning("No model currently loaded")
-        return None
-
-    except requests.exceptions.ConnectionError as e:
-        logger.error(f"Connection failed to {base_url}/running: {e}")
-        return None
-    except requests.exceptions.Timeout:
-        logger.error(f"Timeout querying {base_url}/running")
-        return None
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Request failed: {e}")
-        return None
-    except (KeyError, ValueError) as e:
-        logger.error(f"Failed to parse response: {e}")
-        return None
+    models = get_all_models(base_url)
+    if models:
+        model_id = models[0]
+        logger.info(f"Current model detected: {model_id}")
+        return model_id
+    return None
 
 
 def check_multimodal_support(base_url: str, model_id: str) -> bool:
@@ -348,6 +367,60 @@ def process_pdf_pages(
     return results
 
 
+def process_with_model(
+    pdf_path: str,
+    output_format: str,
+    model_id: str,
+    base_url: str,
+    page_indices: Optional[list] = None,
+) -> str:
+    """
+    Process PDF using any model via the upstream proxy.
+
+    All models are served through the same upstream proxy pattern:
+    {base_url}/upstream/{model_id}/v1
+
+    The only difference between OCR models is the prompt template
+    (handled by get_prompt_template()), not the endpoint or processing logic.
+
+    Args:
+        pdf_path: Path to the PDF file
+        output_format: Output format (markdown or text)
+        model_id: The model ID to use (e.g., "deepseek-ocr", "deepseek-ocr-2", "glm-ocr")
+        base_url: Base URL for the llama-swap endpoint
+        page_indices: List of 0-based page indices to process. If None, all pages are processed.
+
+    Returns:
+        str: Extracted text from the PDF
+
+    Raises:
+        Exception: If PDF processing fails
+    """
+    logger.info(f"Processing PDF with model ({model_id}): {pdf_path}")
+
+    doc = None
+    try:
+        doc = fitz.open(pdf_path)
+        if doc.page_count == 0:
+            raise Exception("PDF has no pages")
+
+        # All models use the upstream proxy endpoint
+        upstream_url = f"{base_url}/upstream/{model_id}/v1"
+        client = OpenAI(api_key="EMPTY", base_url=upstream_url, timeout=3600)
+        prompt_template = get_prompt_template(model_id)
+
+        results = process_pdf_pages(
+            doc, client, model_id, prompt_template, page_indices
+        )
+
+        output = "\n\n".join(results)
+        return output
+
+    finally:
+        if doc is not None:
+            doc.close()
+
+
 def process_with_deepseek_ocr(
     pdf_path: str,
     output_format: str,
@@ -356,6 +429,8 @@ def process_with_deepseek_ocr(
 ) -> str:
     """
     Process PDF using DeepSeek-OCR model.
+
+    Kept for backward compatibility. Delegates to process_with_model().
 
     Args:
         pdf_path: Path to the PDF file
@@ -375,29 +450,7 @@ def process_with_deepseek_ocr(
             "DEEPSEEK_OCR_BASE_URL not set. Set it via environment variable or .env file"
         )
 
-    logger.info(f"Processing PDF with {model_name}: {pdf_path}")
-
-    doc = None
-    try:
-        doc = fitz.open(pdf_path)
-        if doc.page_count == 0:
-            raise Exception("PDF has no pages")
-
-        # DeepSeek-OCR needs the /v1 endpoint
-        deepseek_url = base_url.rstrip("/") + "/v1"
-        client = OpenAI(api_key="EMPTY", base_url=deepseek_url, timeout=3600)
-        prompt_template = get_prompt_template(model_name)
-
-        results = process_pdf_pages(
-            doc, client, model_name, prompt_template, page_indices
-        )
-
-        output = "\n\n".join(results)
-        return output
-
-    finally:
-        if doc is not None:
-            doc.close()
+    return process_with_model(pdf_path, output_format, model_name, base_url, page_indices)
 
 
 def process_with_current_model(
@@ -409,6 +462,8 @@ def process_with_current_model(
 ) -> str:
     """
     Process PDF using the currently loaded multimodal model.
+
+    Kept for backward compatibility. Delegates to process_with_model().
 
     Args:
         pdf_path: Path to the PDF file
@@ -423,29 +478,7 @@ def process_with_current_model(
     Raises:
         Exception: If PDF processing fails
     """
-    logger.info(f"Processing PDF with current model ({model_id}): {pdf_path}")
-
-    doc = None
-    try:
-        doc = fitz.open(pdf_path)
-        if doc.page_count == 0:
-            raise Exception("PDF has no pages")
-
-        # Use the upstream endpoint for the current model
-        upstream_url = f"{base_url}/upstream/{model_id}/v1"
-        client = OpenAI(api_key="EMPTY", base_url=upstream_url, timeout=3600)
-        prompt_template = get_prompt_template(model_id)
-
-        results = process_pdf_pages(
-            doc, client, model_id, prompt_template, page_indices
-        )
-
-        output = "\n\n".join(results)
-        return output
-
-    finally:
-        if doc is not None:
-            doc.close()
+    return process_with_model(pdf_path, output_format, model_id, base_url, page_indices)
 
 
 def load_ocr_routing_config(config_path: Optional[Path] = None) -> dict:
@@ -514,11 +547,50 @@ def get_ocr_method_for_model(model_id: str, config: dict) -> str:
     return default
 
 
+def get_ocr_method_for_model_set(model_ids: list, config: dict) -> str:
+    """
+    Determine OCR method for a set of loaded models.
+
+    Matching priority:
+    1. Exact model-set match (comma-separated key in config)
+    2. Single-model partial match (for each loaded model)
+    3. Default fallback
+
+    Args:
+        model_ids: List of currently loaded model IDs
+        config: The routing configuration dictionary
+
+    Returns:
+        str: OCR method to use
+    """
+    routing = config.get("ocr_routing", {})
+    default = config.get("default", "current_model")
+
+    # Normalize loaded models to lowercase set
+    loaded_set = set(m.strip().lower() for m in model_ids)
+
+    # 1. Try exact model-set match (multi-model keys)
+    for pattern, method in routing.items():
+        if "," in pattern:
+            pattern_set = set(m.strip().lower() for m in pattern.split(","))
+            if loaded_set == pattern_set:
+                return method
+
+    # 2. Single-model matching (backward compatible)
+    for model_id in model_ids:
+        method = get_ocr_method_for_model(model_id, config)
+        if method != default:
+            return method
+
+    # 3. Return default
+    return default
+
+
 def route_ocr_request(
     pdf_path: str, output_format: str, page_spec: Optional[str] = None
 ) -> str:
     """
-    Route OCR request based on model-based configuration.
+    Route OCR request based on model-set-based configuration.
 
     Args:
         pdf_path: Path to the PDF file
@@ -529,8 +601,8 @@ def route_ocr_request(
         str: OCR result text
 
     Exits:
-        0: Success (DeepSeek-OCR or current multimodal model used)
-        1: General error (file not found, processing error, DeepSeek-OCR failure, etc.)
+        0: Success (OCR model or current multimodal model used)
+        1: General error (file not found, processing error, OCR model failure, etc.)
         3: NO_OCR_SUPPORT (current_model routing but model lacks vision support)
     """
     base_url = os.getenv("DEEPSEEK_OCR_BASE_URL")
@@ -540,15 +612,15 @@ def route_ocr_request(
     # Load routing configuration
     routing_config = load_ocr_routing_config()
 
-    # Get current model
-    current_model = get_current_model(base_url)
-    if not current_model:
+    # Get ALL loaded models (not just the first one)
+    loaded_models = get_all_models(base_url)
+    if not loaded_models:
         raise Exception("No model currently loaded")
 
-    # Determine OCR method based on configuration
-    ocr_method = get_ocr_method_for_model(current_model, routing_config)
+    # Determine OCR method based on model SET
+    ocr_method = get_ocr_method_for_model_set(loaded_models, routing_config)
 
-    logger.info(f"Model: {current_model}, OCR method: {ocr_method}")
+    logger.info(f"Loaded models: {loaded_models}, OCR method: {ocr_method}")
 
     # Parse page specification
     doc = fitz.open(pdf_path)
@@ -557,23 +629,13 @@ def route_ocr_request(
     finally:
         doc.close()
 
-    if ocr_method.startswith("deepseek-ocr"):
-        # Use DeepSeek-OCR (handles both "deepseek-ocr" and "deepseek-ocr-2")
-        logger.info(f"Routing to {ocr_method} based on config for {current_model}")
-        try:
-            return process_with_deepseek_ocr(
-                pdf_path, output_format, page_indices, ocr_method
-            )
-        except Exception as e:
-            # DeepSeek-OCR failed - this is a general error (Exit 1)
-            logger.error(f"{ocr_method} failed: {e}")
-            raise
-    else:
+    if ocr_method == "current_model":
         # Use current model - check if it supports vision
-        logger.info(f"Routing to current model based on config for {current_model}")
+        current_model = loaded_models[0]  # Primary model for OCR
+        logger.info(f"Routing to current model ({current_model})")
 
         if check_multimodal_support(base_url, current_model):
-            return process_with_current_model(
+            return process_with_model(
                 pdf_path, output_format, current_model, base_url, page_indices
             )
         else:
@@ -581,12 +643,23 @@ def route_ocr_request(
             error_msg = (
                 f"NO_OCR_SUPPORT: Model '{current_model}' is configured to use "
                 f"current_model for OCR but does not support multimodal/vision capabilities. "
-                f"Add '{current_model}' to ocr_routing.json with 'deepseek-ocr' value "
-                f"to use DeepSeek-OCR instead."
+                f"Add a routing rule for the loaded models ({', '.join(loaded_models)}) "
+                f"to ocr_routing.json to use an OCR model instead."
             )
             logger.error(error_msg)
             print(error_msg, file=sys.stderr)
             sys.exit(3)
+    else:
+        # Use specified OCR model (deepseek-ocr, deepseek-ocr-2, glm-ocr, or any future model)
+        # All models are served through the same upstream proxy pattern
+        logger.info(f"Routing to {ocr_method} based on loaded models: {loaded_models}")
+        try:
+            return process_with_model(
+                pdf_path, output_format, ocr_method, base_url, page_indices
+            )
+        except Exception as e:
+            logger.error(f"{ocr_method} failed: {e}")
+            raise
 
 
 def main():

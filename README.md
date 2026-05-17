@@ -1,6 +1,6 @@
-# DeepSeek-OCR PDF Tool
+# PDF OCR Tool
 
-An OpenCode tool for processing PDF files using DeepSeek-OCR. Converts PDFs to high-quality images, performs OCR on each page, and returns markdown or plain text output.
+An OpenCode tool for processing PDF files using OCR. Converts PDFs to high-quality images, performs OCR on each page, and returns markdown or plain text output. Supports both dedicated OCR models and multimodal vision models.
 
 ## Installation
 
@@ -99,14 +99,18 @@ The tool uses model-based routing to determine which OCR method to use. This is 
 **Structure**:
 ```json
 {
-  "_comment": "OCR Routing Configuration - Maps model IDs to preferred OCR method",
+  "_comment": "OCR Routing Configuration - Maps loaded model sets to preferred OCR method. Single-model keys work as before. Comma-separated keys match ALL loaded models (order-independent).",
   "_routing_options": {
-    "deepseek-ocr": "Use DeepSeek-OCR model (requires sufficient VRAM)",
+    "deepseek-ocr": "Use DeepSeek-OCR model",
+    "deepseek-ocr-2": "Use DeepSeek-OCR-2 model",
+    "glm-ocr": "Use GLM-OCR model",
     "current_model": "Use the currently loaded model (requires vision support)"
   },
   "ocr_routing": {
-    "kimi-k2.5": "deepseek-ocr",
-    "kimi-k2.5-abliterated": "deepseek-ocr"
+    "_comment": "Model-set examples: comma-separated keys match ALL loaded models",
+    "primary-model,secondary-model-a": "deepseek-ocr-2",
+    "primary-model,secondary-model-b": "glm-ocr",
+    "primary-model": "current_model"
   },
   "default": "current_model"
 }
@@ -114,27 +118,45 @@ The tool uses model-based routing to determine which OCR method to use. This is 
 
 **Routing Options**:
 - `deepseek-ocr`: Use the dedicated DeepSeek-OCR model for OCR tasks
+- `deepseek-ocr-2`: Use the DeepSeek-OCR-2 model (improved accuracy)
+- `glm-ocr`: Use the GLM-OCR model
 - `current_model`: Use the currently loaded model (requires vision/multimodal support)
 
-**Matching Logic**:
-1. Exact match: Full model ID in `ocr_routing`
-2. Partial match: Pattern appears in model ID or model ID appears in pattern
-3. Default: Falls back to `default` value if no match found
+**Matching Logic** (most specific first):
+1. **Exact model-set match**: Comma-separated key matches all loaded models exactly (order-independent)
+2. **Single-model match**: Full model ID or partial match in `ocr_routing`
+3. **Default**: Falls back to `default` value if no match found
 
-**Examples**:
-
-Enable DeepSeek-OCR for Kimi models:
+**Single-Model Keys** (backward compatible):
+Keys without commas work exactly as before:
 ```json
 {
   "ocr_routing": {
-    "kimi-k2.5": "deepseek-ocr",
-    "kimi-k2.5-abliterated": "deepseek-ocr"
+    "primary-model": "deepseek-ocr-2",
+    "another-model": "glm-ocr"
   },
   "default": "current_model"
 }
 ```
 
-Always use current model (disable DeepSeek-OCR):
+**Model-Set Keys**:
+When multiple models are loaded simultaneously, you can route based on the complete set:
+```json
+{
+  "ocr_routing": {
+    "primary-model,secondary-model-a": "deepseek-ocr-2",
+    "primary-model,secondary-model-b": "glm-ocr",
+    "primary-model": "current_model"
+  },
+  "default": "current_model"
+}
+```
+In this example:
+- When `primary-model` + `secondary-model-a` are loaded → uses `deepseek-ocr-2`
+- When `primary-model` + `secondary-model-b` are loaded → uses `glm-ocr`
+- When only `primary-model` is loaded → uses `current_model` (vision check required)
+
+Always use current model (disable dedicated OCR):
 ```json
 {
   "ocr_routing": {},
@@ -150,6 +172,8 @@ Enable DeepSeek-OCR for all models by default:
 }
 ```
 
+For more examples, see `ocr_routing.json.example` in the repository.
+
 ## Technical Details
 
 - PDF-to-image conversion at 144 DPI (high quality for OCR)
@@ -161,8 +185,8 @@ Enable DeepSeek-OCR for all models by default:
 
 | Exit Code | Meaning | Scenario |
 |-----------|---------|----------|
-| **0** | Success | OCR completed successfully using either DeepSeek-OCR or a multimodal model |
-| **1** | General Error | File not found, API error, processing error, or DeepSeek-OCR failure |
+| **0** | Success | OCR completed successfully using either a dedicated OCR model or a multimodal model |
+| **1** | General Error | File not found, API error, processing error, or OCR model failure |
 | **3** | NO_OCR_SUPPORT | Current model is configured to use `current_model` routing but lacks vision/multimodal support |
 
 ## Troubleshooting
@@ -173,11 +197,23 @@ This error occurs when:
 - The current model is configured to use `current_model` for OCR routing
 - The model does not support multimodal/vision capabilities
 
-**Solution**: Add the model to `ocr_routing.json` with `deepseek-ocr` value:
+**Solution**: Add a routing rule for the loaded model(s) to `ocr_routing.json`:
+
+For a single model:
 ```json
 {
   "ocr_routing": {
-    "your-model-name": "deepseek-ocr"
+    "your-model-name": "deepseek-ocr-2"
+  },
+  "default": "current_model"
+}
+```
+
+For a model set (when multiple models are loaded):
+```json
+{
+  "ocr_routing": {
+    "your-model,secondary-model": "glm-ocr"
   },
   "default": "current_model"
 }
@@ -185,11 +221,11 @@ This error occurs when:
 
 Or switch to a model with vision support.
 
-### DeepSeek-OCR Failures (Exit Code 1)
+### OCR Model Failures (Exit Code 1)
 
-If DeepSeek-OCR is configured but fails:
+If a dedicated OCR model is configured but fails:
 - Verify the endpoint is running and accessible
-- Check that the DeepSeek-OCR model is loaded
+- Check that the OCR model is loaded at the endpoint
 - Review endpoint logs for errors
 
 ### Configuration File Not Found

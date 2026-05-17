@@ -9,6 +9,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "pdf-ocr" / "tool"))
 import pdf_ocr_backend
+import fitz
 
 
 class TestOCRRoutingConfig(unittest.TestCase):
@@ -115,6 +116,146 @@ class TestOCRRoutingConfig(unittest.TestCase):
 
         result = pdf_ocr_backend.get_ocr_method_for_model("any-model", config)
         self.assertEqual(result, "current_model")
+
+
+class TestModelSetRouting(unittest.TestCase):
+    """Unit tests for model-set based OCR routing."""
+
+    def test_exact_model_set_match(self):
+        """Exact model-set key matches loaded models."""
+        config = {
+            "ocr_routing": {
+                "kimi-k2.6,qwen3.6-27b-nvfp4": "glm-ocr",
+                "kimi-k2.6": "deepseek-ocr-2"
+            },
+            "default": "current_model"
+        }
+        result = pdf_ocr_backend.get_ocr_method_for_model_set(
+            ["kimi-k2.6", "qwen3.6-27b-nvfp4"], config
+        )
+        self.assertEqual(result, "glm-ocr")  # Exact set match wins
+
+    def test_model_set_no_match_fallback_to_single(self):
+        """No exact set match falls back to single-model matching."""
+        config = {
+            "ocr_routing": {
+                "kimi-k2.6,qwen3.6-27b-nvfp4": "glm-ocr",
+                "kimi-k2.6": "deepseek-ocr-2"
+            },
+            "default": "current_model"
+        }
+        result = pdf_ocr_backend.get_ocr_method_for_model_set(
+            ["kimi-k2.6", "qwen3.6-35b-a3b-nvfp4"], config
+        )
+        self.assertEqual(result, "deepseek-ocr-2")  # Single-model match
+
+    def test_model_set_order_independent(self):
+        """Model-set matching is order-independent."""
+        config = {
+            "ocr_routing": {
+                "qwen3.6-27b-nvfp4,kimi-k2.6": "glm-ocr"
+            },
+            "default": "current_model"
+        }
+        result = pdf_ocr_backend.get_ocr_method_for_model_set(
+            ["kimi-k2.6", "qwen3.6-27b-nvfp4"], config
+        )
+        self.assertEqual(result, "glm-ocr")
+
+    def test_single_model_no_set_match(self):
+        """Single model loaded, no set key matches."""
+        config = {
+            "ocr_routing": {
+                "kimi-k2.6,qwen3.6-27b-nvfp4": "glm-ocr",
+                "kimi-k2.6": "deepseek-ocr-2"
+            },
+            "default": "current_model"
+        }
+        result = pdf_ocr_backend.get_ocr_method_for_model_set(["kimi-k2.6"], config)
+        self.assertEqual(result, "deepseek-ocr-2")
+
+    def test_no_match_returns_default(self):
+        """No matching keys returns default."""
+        config = {
+            "ocr_routing": {
+                "kimi-k2.6,qwen3.6-27b-nvfp4": "glm-ocr"
+            },
+            "default": "current_model"
+        }
+        result = pdf_ocr_backend.get_ocr_method_for_model_set(["unknown-model"], config)
+        self.assertEqual(result, "current_model")
+
+    def test_case_insensitive_matching(self):
+        """Model IDs are matched case-insensitively."""
+        config = {
+            "ocr_routing": {
+                "KIMI-K2.6,QWEN3.6-27B-NVFP4": "glm-ocr"
+            },
+            "default": "current_model"
+        }
+        result = pdf_ocr_backend.get_ocr_method_for_model_set(
+            ["kimi-k2.6", "qwen3.6-27b-nvfp4"], config
+        )
+        self.assertEqual(result, "glm-ocr")
+
+
+class TestGetAllModels(unittest.TestCase):
+    """Unit tests for get_all_models function."""
+
+    @patch("pdf_ocr_backend.requests.get")
+    def test_get_all_models_llama_swap_format(self, mock_get):
+        """Test get_all_models with llama-swap /running format."""
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "running": [
+                {"model": "kimi-k2.6"},
+                {"model": "qwen3.6-35b-a3b-nvfp4"}
+            ]
+        }
+        mock_response.raise_for_status = MagicMock()
+        mock_get.return_value = mock_response
+
+        result = pdf_ocr_backend.get_all_models("http://test:8080")
+
+        self.assertEqual(result, ["kimi-k2.6", "qwen3.6-35b-a3b-nvfp4"])
+
+    @patch("pdf_ocr_backend.requests.get")
+    def test_get_all_models_empty(self, mock_get):
+        """Test get_all_models with no running models."""
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"running": []}
+        mock_response.raise_for_status = MagicMock()
+        mock_get.return_value = mock_response
+
+        result = pdf_ocr_backend.get_all_models("http://test:8080")
+
+        self.assertEqual(result, [])
+
+    @patch("pdf_ocr_backend.requests.get")
+    def test_get_all_models_list_format(self, mock_get):
+        """Test get_all_models with list response format."""
+        mock_response = MagicMock()
+        mock_response.json.return_value = [
+            {"model": "model-a"},
+            {"model": "model-b"}
+        ]
+        mock_response.raise_for_status = MagicMock()
+        mock_get.return_value = mock_response
+
+        result = pdf_ocr_backend.get_all_models("http://test:8080")
+
+        self.assertEqual(result, ["model-a", "model-b"])
+
+    @patch("pdf_ocr_backend.requests.get")
+    def test_get_all_models_connection_error(self, mock_get):
+        """Test get_all_models with connection failure."""
+        import requests
+
+        mock_get.side_effect = requests.exceptions.ConnectionError("Connection refused")
+
+        result = pdf_ocr_backend.get_all_models("http://test:8080")
+
+        self.assertEqual(result, [])
 
 
 class TestModelDetection(unittest.TestCase):
@@ -253,6 +394,11 @@ class TestModelRouter(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
         self.test_pdf = os.path.join(self.temp_dir, "test.pdf")
+        # Create a minimal valid PDF for fitz.open()
+        doc = fitz.open()
+        doc.new_page(width=612, height=792)
+        doc.save(self.test_pdf)
+        doc.close()
 
     def tearDown(self):
         import shutil
@@ -274,15 +420,15 @@ class TestModelRouter(unittest.TestCase):
         self.assertIn("OCR assistant", template["system"])
         self.assertEqual(template["extra_body"], None)
 
-    @patch("pdf_ocr_backend.process_with_deepseek_ocr")
+    @patch("pdf_ocr_backend.process_with_model")
     @patch("pdf_ocr_backend.load_ocr_routing_config")
-    @patch("pdf_ocr_backend.get_current_model")
+    @patch("pdf_ocr_backend.get_all_models")
     @patch.dict(os.environ, {"DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1"})
     def test_route_ocr_request_deepseek_ocr_configured_success(
-        self, mock_get_model, mock_load_config, mock_process
+        self, mock_get_models, mock_load_config, mock_process
     ):
         """Test routing to DeepSeek-OCR when configured and successful."""
-        mock_get_model.return_value = "test-model"
+        mock_get_models.return_value = ["test-model"]
         mock_load_config.return_value = {
             "ocr_routing": {"test-model": "deepseek-ocr"},
             "default": "current_model",
@@ -292,17 +438,19 @@ class TestModelRouter(unittest.TestCase):
         result = pdf_ocr_backend.route_ocr_request(self.test_pdf, "markdown")
 
         self.assertEqual(result, "DeepSeek OCR result")
-        mock_process.assert_called_once_with(self.test_pdf, "markdown")
+        mock_process.assert_called_once_with(
+            self.test_pdf, "markdown", "deepseek-ocr", "http://test:8080/v1", [0]
+        )
 
-    @patch("pdf_ocr_backend.process_with_deepseek_ocr")
+    @patch("pdf_ocr_backend.process_with_model")
     @patch("pdf_ocr_backend.load_ocr_routing_config")
-    @patch("pdf_ocr_backend.get_current_model")
+    @patch("pdf_ocr_backend.get_all_models")
     @patch.dict(os.environ, {"DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1"})
     def test_route_ocr_request_deepseek_ocr_configured_failure(
-        self, mock_get_model, mock_load_config, mock_process
+        self, mock_get_models, mock_load_config, mock_process
     ):
         """Test routing to DeepSeek-OCR when configured but fails (Exit 1)."""
-        mock_get_model.return_value = "test-model"
+        mock_get_models.return_value = ["test-model"]
         mock_load_config.return_value = {
             "ocr_routing": {"test-model": "deepseek-ocr"},
             "default": "current_model",
@@ -314,16 +462,16 @@ class TestModelRouter(unittest.TestCase):
 
         self.assertIn("DeepSeek-OCR failed", str(cm.exception))
 
-    @patch("pdf_ocr_backend.process_with_current_model")
+    @patch("pdf_ocr_backend.process_with_model")
     @patch("pdf_ocr_backend.check_multimodal_support")
     @patch("pdf_ocr_backend.load_ocr_routing_config")
-    @patch("pdf_ocr_backend.get_current_model")
+    @patch("pdf_ocr_backend.get_all_models")
     @patch.dict(os.environ, {"DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1"})
     def test_route_ocr_request_current_model_with_vision(
-        self, mock_get_model, mock_load_config, mock_multimodal, mock_process
+        self, mock_get_models, mock_load_config, mock_multimodal, mock_process
     ):
         """Test routing to current model with vision support (Exit 0)."""
-        mock_get_model.return_value = "qwen-vl"
+        mock_get_models.return_value = ["qwen-vl"]
         mock_load_config.return_value = {
             "ocr_routing": {"qwen-vl": "current_model"},
             "default": "current_model",
@@ -335,18 +483,18 @@ class TestModelRouter(unittest.TestCase):
 
         self.assertEqual(result, "Current model OCR result")
         mock_process.assert_called_once_with(
-            self.test_pdf, "markdown", "qwen-vl", "http://test:8080/v1"
+            self.test_pdf, "markdown", "qwen-vl", "http://test:8080/v1", [0]
         )
 
     @patch("pdf_ocr_backend.check_multimodal_support")
     @patch("pdf_ocr_backend.load_ocr_routing_config")
-    @patch("pdf_ocr_backend.get_current_model")
+    @patch("pdf_ocr_backend.get_all_models")
     @patch.dict(os.environ, {"DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1"})
     def test_route_ocr_request_current_model_no_vision_exit_3(
-        self, mock_get_model, mock_load_config, mock_multimodal
+        self, mock_get_models, mock_load_config, mock_multimodal
     ):
         """Test routing to current model without vision support (Exit 3)."""
-        mock_get_model.return_value = "text-only-model"
+        mock_get_models.return_value = ["text-only-model"]
         mock_load_config.return_value = {
             "ocr_routing": {"text-only-model": "current_model"},
             "default": "current_model",
@@ -358,16 +506,16 @@ class TestModelRouter(unittest.TestCase):
 
         self.assertEqual(cm.exception.code, 3)
 
-    @patch("pdf_ocr_backend.process_with_current_model")
+    @patch("pdf_ocr_backend.process_with_model")
     @patch("pdf_ocr_backend.check_multimodal_support")
     @patch("pdf_ocr_backend.load_ocr_routing_config")
-    @patch("pdf_ocr_backend.get_current_model")
+    @patch("pdf_ocr_backend.get_all_models")
     @patch.dict(os.environ, {"DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1"})
     def test_route_ocr_request_model_not_in_config_with_vision(
-        self, mock_get_model, mock_load_config, mock_multimodal, mock_process
+        self, mock_get_models, mock_load_config, mock_multimodal, mock_process
     ):
         """Test routing when model not in config but has vision support."""
-        mock_get_model.return_value = "new-model"
+        mock_get_models.return_value = ["new-model"]
         mock_load_config.return_value = {"ocr_routing": {}, "default": "current_model"}
         mock_multimodal.return_value = True
         mock_process.return_value = "OCR result"
@@ -378,13 +526,13 @@ class TestModelRouter(unittest.TestCase):
 
     @patch("pdf_ocr_backend.check_multimodal_support")
     @patch("pdf_ocr_backend.load_ocr_routing_config")
-    @patch("pdf_ocr_backend.get_current_model")
+    @patch("pdf_ocr_backend.get_all_models")
     @patch.dict(os.environ, {"DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1"})
     def test_route_ocr_request_model_not_in_config_no_vision_exit_3(
-        self, mock_get_model, mock_load_config, mock_multimodal
+        self, mock_get_models, mock_load_config, mock_multimodal
     ):
         """Test routing when model not in config and no vision support (Exit 3)."""
-        mock_get_model.return_value = "text-model"
+        mock_get_models.return_value = ["text-model"]
         mock_load_config.return_value = {"ocr_routing": {}, "default": "current_model"}
         mock_multimodal.return_value = False
 
@@ -401,11 +549,11 @@ class TestModelRouter(unittest.TestCase):
 
         self.assertIn("DEEPSEEK_OCR_BASE_URL not set", str(cm.exception))
 
-    @patch("pdf_ocr_backend.get_current_model")
+    @patch("pdf_ocr_backend.get_all_models")
     @patch.dict(os.environ, {"DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1"})
-    def test_route_ocr_request_no_model_loaded(self, mock_get_model):
+    def test_route_ocr_request_no_model_loaded(self, mock_get_models):
         """Test route_ocr_request when no model is loaded."""
-        mock_get_model.return_value = None
+        mock_get_models.return_value = []
 
         with self.assertRaises(Exception) as cm:
             pdf_ocr_backend.route_ocr_request(self.test_pdf, "markdown")
@@ -423,16 +571,16 @@ class TestPDFOCRBackend(unittest.TestCase):
 
         shutil.rmtree(self.temp_dir)
 
-    @patch("pdf_ocr_backend.process_with_deepseek_ocr")
+    @patch("pdf_ocr_backend.process_with_model")
     @patch("pdf_ocr_backend.load_ocr_routing_config")
-    @patch("pdf_ocr_backend.get_current_model")
+    @patch("pdf_ocr_backend.get_all_models")
     @patch("pdf_ocr_backend.fitz.open")
     @patch("pdf_ocr_backend.OpenAI")
     def test_main_with_valid_pdf(
         self,
         mock_openai,
         mock_fitz_open,
-        mock_get_model,
+        mock_get_models,
         mock_load_config,
         mock_process,
     ):
@@ -452,7 +600,7 @@ class TestPDFOCRBackend(unittest.TestCase):
         mock_client.chat.completions.create.return_value = mock_response
         mock_openai.return_value = mock_client
 
-        mock_get_model.return_value = "test-model"
+        mock_get_models.return_value = ["test-model"]
         mock_load_config.return_value = {
             "ocr_routing": {"test-model": "deepseek-ocr"},
             "default": "current_model",
@@ -517,16 +665,16 @@ class TestPDFOCRBackend(unittest.TestCase):
                         pdf_ocr_backend.main()
                     self.assertEqual(cm.exception.code, 1)
 
-    @patch("pdf_ocr_backend.process_with_deepseek_ocr")
+    @patch("pdf_ocr_backend.process_with_model")
     @patch("pdf_ocr_backend.load_ocr_routing_config")
-    @patch("pdf_ocr_backend.get_current_model")
+    @patch("pdf_ocr_backend.get_all_models")
     @patch("pdf_ocr_backend.fitz.open")
     @patch("pdf_ocr_backend.OpenAI")
     def test_main_default_output_format(
         self,
         mock_openai,
         mock_fitz_open,
-        mock_get_model,
+        mock_get_models,
         mock_load_config,
         mock_process,
     ):
@@ -546,7 +694,7 @@ class TestPDFOCRBackend(unittest.TestCase):
         mock_client.chat.completions.create.return_value = mock_response
         mock_openai.return_value = mock_client
 
-        mock_get_model.return_value = "test-model"
+        mock_get_models.return_value = ["test-model"]
         mock_load_config.return_value = {
             "ocr_routing": {"test-model": "deepseek-ocr"},
             "default": "current_model",
@@ -589,6 +737,11 @@ class TestExitCode3(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
         self.test_pdf = os.path.join(self.temp_dir, "test.pdf")
+        # Create a minimal valid PDF for fitz.open()
+        doc = fitz.open()
+        doc.new_page(width=612, height=792)
+        doc.save(self.test_pdf)
+        doc.close()
 
     def tearDown(self):
         import shutil
@@ -597,13 +750,13 @@ class TestExitCode3(unittest.TestCase):
 
     @patch("pdf_ocr_backend.check_multimodal_support")
     @patch("pdf_ocr_backend.load_ocr_routing_config")
-    @patch("pdf_ocr_backend.get_current_model")
+    @patch("pdf_ocr_backend.get_all_models")
     @patch.dict(os.environ, {"DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1"})
     def test_exit_3_only_when_current_model_configured_no_vision(
-        self, mock_get_model, mock_load_config, mock_multimodal
+        self, mock_get_models, mock_load_config, mock_multimodal
     ):
         """Verify Exit 3 only occurs when current_model configured but no vision support."""
-        mock_get_model.return_value = "text-model"
+        mock_get_models.return_value = ["text-model"]
         mock_load_config.return_value = {
             "ocr_routing": {"text-model": "current_model"},
             "default": "current_model",
@@ -617,13 +770,13 @@ class TestExitCode3(unittest.TestCase):
 
     @patch("pdf_ocr_backend.check_multimodal_support")
     @patch("pdf_ocr_backend.load_ocr_routing_config")
-    @patch("pdf_ocr_backend.get_current_model")
+    @patch("pdf_ocr_backend.get_all_models")
     @patch.dict(os.environ, {"DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1"})
     def test_exit_3_error_message_format(
-        self, mock_get_model, mock_load_config, mock_multimodal
+        self, mock_get_models, mock_load_config, mock_multimodal
     ):
         """Verify error message includes model name and configuration instructions."""
-        mock_get_model.return_value = "my-text-model"
+        mock_get_models.return_value = ["my-text-model"]
         mock_load_config.return_value = {
             "ocr_routing": {"my-text-model": "current_model"},
             "default": "current_model",
@@ -645,7 +798,305 @@ class TestExitCode3(unittest.TestCase):
             self.assertIn("NO_OCR_SUPPORT", error_output)
             self.assertIn("my-text-model", error_output)
             self.assertIn("ocr_routing.json", error_output)
-            self.assertIn("deepseek-ocr", error_output)
+            self.assertIn("loaded models", error_output)
+
+
+class TestIntegrationWorkflow(unittest.TestCase):
+    """Integration tests for full route_ocr_request workflow with model-set routing."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.test_pdf = os.path.join(self.temp_dir, "test.pdf")
+        # Create a minimal valid PDF for fitz.open()
+        doc = fitz.open()
+        doc.new_page(width=612, height=792)
+        doc.save(self.test_pdf)
+        doc.close()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.temp_dir)
+
+    @patch("pdf_ocr_backend.process_with_model")
+    @patch("pdf_ocr_backend.load_ocr_routing_config")
+    @patch("pdf_ocr_backend.get_all_models")
+    @patch.dict(os.environ, {"DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1"})
+    def test_integration_kimi_qwen35b_routes_to_deepseek_ocr2(
+        self, mock_get_models, mock_load_config, mock_process
+    ):
+        """Kimi-K2.6 + Qwen3.6-35B-A3B loaded -> routes to deepseek-ocr-2."""
+        mock_get_models.return_value = ["kimi-k2.6", "qwen3.6-35b-a3b-nvfp4"]
+        mock_load_config.return_value = {
+            "ocr_routing": {
+                "kimi-k2.6,qwen3.6-35b-a3b-nvfp4": "deepseek-ocr-2",
+                "kimi-k2.6,qwen3.6-27b-nvfp4": "glm-ocr",
+                "kimi-k2.6": "current_model",
+            },
+            "default": "current_model",
+        }
+        mock_process.return_value = "DeepSeek-OCR-2 result"
+
+        result = pdf_ocr_backend.route_ocr_request(self.test_pdf, "markdown")
+
+        self.assertEqual(result, "DeepSeek-OCR-2 result")
+        mock_process.assert_called_once_with(
+            self.test_pdf, "markdown", "deepseek-ocr-2", "http://test:8080/v1", [0]
+        )
+
+    @patch("pdf_ocr_backend.process_with_model")
+    @patch("pdf_ocr_backend.load_ocr_routing_config")
+    @patch("pdf_ocr_backend.get_all_models")
+    @patch.dict(os.environ, {"DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1"})
+    def test_integration_kimi_qwen27b_routes_to_glm_ocr(
+        self, mock_get_models, mock_load_config, mock_process
+    ):
+        """Kimi-K2.6 + Qwen3.6-27B loaded -> routes to glm-ocr."""
+        mock_get_models.return_value = ["kimi-k2.6", "qwen3.6-27b-nvfp4"]
+        mock_load_config.return_value = {
+            "ocr_routing": {
+                "kimi-k2.6,qwen3.6-35b-a3b-nvfp4": "deepseek-ocr-2",
+                "kimi-k2.6,qwen3.6-27b-nvfp4": "glm-ocr",
+                "kimi-k2.6": "current_model",
+            },
+            "default": "current_model",
+        }
+        mock_process.return_value = "GLM-OCR result"
+
+        result = pdf_ocr_backend.route_ocr_request(self.test_pdf, "markdown")
+
+        self.assertEqual(result, "GLM-OCR result")
+        mock_process.assert_called_once_with(
+            self.test_pdf, "markdown", "glm-ocr", "http://test:8080/v1", [0]
+        )
+
+    @patch("pdf_ocr_backend.process_with_model")
+    @patch("pdf_ocr_backend.check_multimodal_support")
+    @patch("pdf_ocr_backend.load_ocr_routing_config")
+    @patch("pdf_ocr_backend.get_all_models")
+    @patch.dict(os.environ, {"DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1"})
+    def test_integration_kimi_only_routes_to_current_model(
+        self, mock_get_models, mock_load_config, mock_multimodal, mock_process
+    ):
+        """Kimi-K2.6 only loaded -> routes to current_model with vision check."""
+        mock_get_models.return_value = ["kimi-k2.6"]
+        mock_load_config.return_value = {
+            "ocr_routing": {
+                "kimi-k2.6,qwen3.6-35b-a3b-nvfp4": "deepseek-ocr-2",
+                "kimi-k2.6,qwen3.6-27b-nvfp4": "glm-ocr",
+                "kimi-k2.6": "current_model",
+            },
+            "default": "current_model",
+        }
+        mock_multimodal.return_value = True
+        mock_process.return_value = "Current model OCR result"
+
+        result = pdf_ocr_backend.route_ocr_request(self.test_pdf, "markdown")
+
+        self.assertEqual(result, "Current model OCR result")
+        mock_process.assert_called_once_with(
+            self.test_pdf, "markdown", "kimi-k2.6", "http://test:8080/v1", [0]
+        )
+
+    @patch("pdf_ocr_backend.load_ocr_routing_config")
+    @patch("pdf_ocr_backend.get_all_models")
+    @patch.dict(os.environ, {"DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1"})
+    def test_integration_no_models_loaded(
+        self, mock_get_models, mock_load_config
+    ):
+        """No models loaded -> raises 'No model currently loaded' exception."""
+        mock_get_models.return_value = []
+        mock_load_config.return_value = {
+            "ocr_routing": {
+                "kimi-k2.6,qwen3.6-35b-a3b-nvfp4": "deepseek-ocr-2",
+            },
+            "default": "current_model",
+        }
+
+        with self.assertRaises(Exception) as cm:
+            pdf_ocr_backend.route_ocr_request(self.test_pdf, "markdown")
+
+        self.assertIn("No model currently loaded", str(cm.exception))
+
+
+class TestBackwardCompatibility(unittest.TestCase):
+    """Explicit backward compatibility verification tests."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.test_pdf = os.path.join(self.temp_dir, "test.pdf")
+        # Create a minimal valid PDF for fitz.open()
+        doc = fitz.open()
+        doc.new_page(width=612, height=792)
+        doc.save(self.test_pdf)
+        doc.close()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.temp_dir)
+
+    def test_single_model_keys_without_commas_work_as_before(self):
+        """Old-style config with only single-model keys works unchanged."""
+        config = {
+            "ocr_routing": {
+                "kimi-k2.5": "deepseek-ocr-2",
+                "kimi-k2.5-abliterated": "deepseek-ocr-2"
+            },
+            "default": "current_model"
+        }
+        # Using new model-set function with old config
+        result = pdf_ocr_backend.get_ocr_method_for_model_set(
+            ["kimi-k2.5"], config
+        )
+        self.assertEqual(result, "deepseek-ocr-2")
+
+    def test_existing_config_without_model_set_keys_works(self):
+        """Config without any model-set keys (no commas) works without modification."""
+        config = {
+            "ocr_routing": {
+                "some-model": "deepseek-ocr"
+            },
+            "default": "current_model"
+        }
+        result = pdf_ocr_backend.get_ocr_method_for_model_set(
+            ["some-model"], config
+        )
+        self.assertEqual(result, "deepseek-ocr")
+
+    def test_default_key_behavior_unchanged(self):
+        """Default key still falls back correctly when no match found."""
+        config = {
+            "ocr_routing": {"other-model": "deepseek-ocr"},
+            "default": "current_model"
+        }
+        result = pdf_ocr_backend.get_ocr_method_for_model_set(
+            ["unknown-model"], config
+        )
+        self.assertEqual(result, "current_model")
+
+    @patch("pdf_ocr_backend.requests.get")
+    def test_get_current_model_returns_first_loaded_model(self, mock_get):
+        """get_current_model() is retained and returns first loaded model."""
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "running": [
+                {"model": "first-model"},
+                {"model": "second-model"}
+            ]
+        }
+        mock_response.raise_for_status = MagicMock()
+        mock_get.return_value = mock_response
+
+        result = pdf_ocr_backend.get_current_model("http://test:8080")
+
+        self.assertEqual(result, "first-model")
+
+    @patch("pdf_ocr_backend.process_with_model")
+    @patch("pdf_ocr_backend.load_ocr_routing_config")
+    @patch("pdf_ocr_backend.get_all_models")
+    @patch.dict(os.environ, {"DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1"})
+    def test_route_ocr_request_signature_unchanged(
+        self, mock_get_models, mock_load_config, mock_process
+    ):
+        """route_ocr_request() signature accepts same positional args as before."""
+        mock_get_models.return_value = ["test-model"]
+        mock_load_config.return_value = {
+            "ocr_routing": {"test-model": "deepseek-ocr"},
+            "default": "current_model",
+        }
+        mock_process.return_value = "Success"
+
+        # Call with same signature as before: pdf_path, output_format
+        result = pdf_ocr_backend.route_ocr_request(self.test_pdf, "markdown")
+
+        self.assertEqual(result, "Success")
+
+    @patch("pdf_ocr_backend.process_with_model")
+    @patch("pdf_ocr_backend.load_ocr_routing_config")
+    @patch("pdf_ocr_backend.get_all_models")
+    @patch.dict(os.environ, {"DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1"})
+    def test_exit_code_0_unchanged_success(
+        self, mock_get_models, mock_load_config, mock_process
+    ):
+        """Exit code 0 still indicates successful OCR completion."""
+        mock_get_models.return_value = ["test-model"]
+        mock_load_config.return_value = {
+            "ocr_routing": {"test-model": "deepseek-ocr"},
+            "default": "current_model",
+        }
+        mock_process.return_value = "OCR completed successfully"
+
+        result = pdf_ocr_backend.route_ocr_request(self.test_pdf, "markdown")
+
+        self.assertEqual(result, "OCR completed successfully")
+
+    @patch("pdf_ocr_backend.process_with_model")
+    @patch("pdf_ocr_backend.load_ocr_routing_config")
+    @patch("pdf_ocr_backend.get_all_models")
+    @patch.dict(os.environ, {"DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1"})
+    def test_exit_code_1_unchanged_general_error(
+        self, mock_get_models, mock_load_config, mock_process
+    ):
+        """Exit code 1 still indicates general error (e.g., OCR failure)."""
+        mock_get_models.return_value = ["test-model"]
+        mock_load_config.return_value = {
+            "ocr_routing": {"test-model": "deepseek-ocr"},
+            "default": "current_model",
+        }
+        mock_process.side_effect = Exception("OCR service failed")
+
+        with self.assertRaises(Exception) as cm:
+            pdf_ocr_backend.route_ocr_request(self.test_pdf, "markdown")
+
+        self.assertIn("OCR service failed", str(cm.exception))
+
+    @patch("pdf_ocr_backend.check_multimodal_support")
+    @patch("pdf_ocr_backend.load_ocr_routing_config")
+    @patch("pdf_ocr_backend.get_all_models")
+    @patch.dict(os.environ, {"DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1"})
+    def test_exit_code_3_unchanged_no_ocr_support(
+        self, mock_get_models, mock_load_config, mock_multimodal
+    ):
+        """Exit code 3 still indicates NO_OCR_SUPPORT with updated message."""
+        mock_get_models.return_value = ["text-only-model"]
+        mock_load_config.return_value = {
+            "ocr_routing": {"text-only-model": "current_model"},
+            "default": "current_model",
+        }
+        mock_multimodal.return_value = False
+
+        with self.assertRaises(SystemExit) as cm:
+            pdf_ocr_backend.route_ocr_request(self.test_pdf, "markdown")
+
+        self.assertEqual(cm.exception.code, 3)
+
+    @patch("pdf_ocr_backend.check_multimodal_support")
+    @patch("pdf_ocr_backend.load_ocr_routing_config")
+    @patch("pdf_ocr_backend.get_all_models")
+    @patch.dict(os.environ, {"DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1"})
+    def test_exit_code_3_error_message_mentions_model_sets(
+        self, mock_get_models, mock_load_config, mock_multimodal
+    ):
+        """Exit code 3 error message mentions loaded model sets."""
+        mock_get_models.return_value = ["text-only-model"]
+        mock_load_config.return_value = {
+            "ocr_routing": {"text-only-model": "current_model"},
+            "default": "current_model",
+        }
+        mock_multimodal.return_value = False
+
+        with patch("sys.stderr") as mock_stderr:
+            with self.assertRaises(SystemExit):
+                pdf_ocr_backend.route_ocr_request(self.test_pdf, "markdown")
+
+            error_output = ""
+            for call in mock_stderr.write.call_args_list:
+                args = call[0]
+                if args:
+                    error_output += str(args[0])
+
+            self.assertIn("NO_OCR_SUPPORT", error_output)
+            self.assertIn("loaded models", error_output)
+            self.assertIn("ocr_routing.json", error_output)
 
 
 if __name__ == "__main__":

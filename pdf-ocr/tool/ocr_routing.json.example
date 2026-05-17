@@ -1,0 +1,17 @@
+{
+  "_comment": "OCR Routing Configuration - Maps loaded model sets to preferred OCR method",
+  "_routing_options": {
+    "deepseek-ocr": "Use DeepSeek-OCR model (requires sufficient VRAM)",
+    "deepseek-ocr-2": "Use DeepSeek-OCR-2 model (requires sufficient VRAM)",
+    "glm-ocr": "Use GLM-OCR model (lighter VRAM, for constrained setups)",
+    "current_model": "Use the currently loaded model (requires vision support)"
+  },
+  "ocr_routing": {
+    "_comment": "Model-set examples: comma-separated keys match ALL loaded models",
+    "kimi-k2.6,qwen3.6-35b-a3b-nvfp4": "deepseek-ocr-2",
+    "kimi-k2.6,qwen3.6-27b-nvfp4,qwen3.5-4b": "glm-ocr",
+    "kimi-k2.6,qwen3.6-27b-nvfp4": "glm-ocr",
+    "kimi-k2.6": "deepseek-ocr-2"
+  },
+  "default": "current_model"
+}

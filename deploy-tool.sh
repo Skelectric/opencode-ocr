@@ -66,8 +66,10 @@ cp "$REPO_DIR/pdf-ocr/tool/pdf-ocr.ts" "$TOOL_DIR/"
 cp "$REPO_DIR/pdf-ocr/tool/pdf_ocr_backend.py" "$TOOL_DIR/"
 cp "$REPO_DIR/pdf-ocr/pyproject.toml" "$TOOL_DIR/"
 
-# Copy routing config to tool directory (same location as pdf_ocr_backend.py)
-cp "$REPO_DIR/pdf-ocr/tool/ocr_routing.json" "$TOOL_DIR/"
+# Copy example routing config as reference (never overwrite user config)
+if [ ! -f "$TOOL_DIR/ocr_routing.json.example" ]; then
+    cp "$REPO_DIR/pdf-ocr/tool/ocr_routing.json.example" "$TOOL_DIR/"
+fi
 
 # Make Python script executable
 chmod +x "$TOOL_DIR/pdf_ocr_backend.py"
@@ -101,16 +103,24 @@ if [ ! -f "$ENV_FILE" ]; then
     if [ ! -f "$ROUTING_CONFIG" ]; then
         echo ""
         echo "Creating OCR routing configuration..."
-        echo "This file maps models to their preferred OCR method."
+        echo "This file maps loaded model sets to their preferred OCR method."
+        echo "Single-model keys work as before. Comma-separated keys match ALL loaded models."
         
         cat > "$ROUTING_CONFIG" << 'EOF'
 {
-  "_comment": "OCR Routing Configuration - Maps model IDs to preferred OCR method",
+  "_comment": "OCR Routing Configuration - Maps loaded model sets to preferred OCR method. Single-model keys work as before. Comma-separated keys match ALL loaded models (order-independent).",
   "_routing_options": {
     "deepseek-ocr": "Use DeepSeek-OCR model (requires sufficient VRAM)",
+    "deepseek-ocr-2": "Use DeepSeek-OCR-2 model (requires sufficient VRAM)",
+    "glm-ocr": "Use GLM-OCR model (lighter VRAM, for constrained setups)",
     "current_model": "Use the currently loaded model (requires vision support)"
   },
-  "ocr_routing": {},
+  "ocr_routing": {
+    "_comment": "Model-set examples: comma-separated keys match ALL loaded models",
+    "kimi-k2.6,qwen3.6-35b-a3b-nvfp4": "deepseek-ocr-2",
+    "kimi-k2.6,qwen3.6-27b-nvfp4": "glm-ocr",
+    "kimi-k2.6": "current_model"
+  },
   "default": "current_model"
 }
 EOF
@@ -120,6 +130,10 @@ EOF
     fi
 else
     echo ".env file already exists at $ENV_FILE"
+    # During updates, remind users about the example config
+    if [ -f "$TOOL_DIR/ocr_routing.json.example" ]; then
+        echo "Reference config with model-set routing examples: $TOOL_DIR/ocr_routing.json.example"
+    fi
 fi
 
 # Install/update Python dependencies
