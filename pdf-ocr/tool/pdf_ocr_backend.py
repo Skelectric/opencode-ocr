@@ -11,6 +11,8 @@ import argparse
 from dotenv import load_dotenv
 import logging
 import requests
+import tempfile
+import urllib.parse
 
 # Load environment variables from .env file in the tool directory
 tool_dir = Path(__file__).parent
@@ -57,6 +59,114 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+# Maximum downloadable PDF size (50 MB)
+MAX_DOWNLOAD_SIZE = 50 * 1024 * 1024
+
+
+def is_url(path: str) -> bool:
+    """Check if a path is a URL."""
+    parsed = urllib.parse.urlparse(path)
+    return parsed.scheme in ("http", "https")
+
+
+def download_pdf(url: str, max_size: int = MAX_DOWNLOAD_SIZE) -> str:
+    """
+    Download a PDF from a URL to a temporary file.
+
+    Args:
+        url: The URL to download from
+        max_size: Maximum allowed file size in bytes
+
+    Returns:
+        str: Path to the downloaded temporary PDF file
+
+    Raises:
+        Exception: If download fails, size exceeds limit, or content is not a valid PDF
+    """
+    logger.info(f"Downloading PDF from: {url}")
+
+    try:
+        response = requests.get(url, stream=True, timeout=60, allow_redirects=True)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"Failed to download PDF from {url}: {e}")
+
+    # Check Content-Length if available
+    content_length = response.headers.get("Content-Length")
+    if content_length:
+        try:
+            total_size = int(content_length)
+            if total_size > max_size:
+                raise Exception(
+                    f"PDF file too large ({total_size / 1024 / 1024:.1f} MB). "
+                    f"Maximum allowed size is {max_size / 1024 / 1024:.0f} MB."
+                )
+        except ValueError:
+            pass  # Ignore invalid Content-Length
+
+    # Stream download with size limit
+    downloaded_size = 0
+    chunks = []
+    for chunk in response.iter_content(chunk_size=8192):
+        if chunk:
+            downloaded_size += len(chunk)
+            if downloaded_size > max_size:
+                raise Exception(
+                    f"PDF file exceeds maximum allowed size of {max_size / 1024 / 1024:.0f} MB."
+                )
+            chunks.append(chunk)
+
+    pdf_bytes = b"".join(chunks)
+
+    if not pdf_bytes:
+        raise Exception(f"Downloaded PDF from {url} is empty.")
+
+    # Save to temporary file
+    temp_file = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+    try:
+        temp_file.write(pdf_bytes)
+        temp_file.flush()
+        temp_file_path = temp_file.name
+    finally:
+        temp_file.close()
+
+    # Validate that it's a valid PDF
+    doc = None
+    page_count = 0
+    try:
+        doc = fitz.open(temp_file_path)
+        page_count = doc.page_count
+        if page_count == 0:
+            raise Exception("Downloaded file is not a valid PDF (no pages).")
+    except Exception as e:
+        # Clean up temp file on validation failure
+        try:
+            os.unlink(temp_file_path)
+        except OSError:
+            pass
+        if "no pages" in str(e).lower():
+            raise
+        raise Exception(f"Downloaded file is not a valid PDF: {e}")
+    finally:
+        if doc is not None:
+            doc.close()
+
+    logger.info(
+        f"PDF downloaded successfully: {temp_file_path} "
+        f"({downloaded_size / 1024:.1f} KB, {page_count} pages)"
+    )
+    return temp_file_path
+
+
+def cleanup_temp_file(path: str) -> None:
+    """Delete a temporary file if it exists."""
+    try:
+        if os.path.exists(path):
+            os.unlink(path)
+            logger.debug(f"Cleaned up temporary file: {path}")
+    except OSError as e:
+        logger.warning(f"Failed to clean up temporary file {path}: {e}")
 
 
 def get_all_models(base_url: str) -> list:
@@ -664,7 +774,7 @@ def route_ocr_request(
 
 def main():
     parser = argparse.ArgumentParser(description="Process PDF using DeepSeek-OCR")
-    parser.add_argument("pdf_path", help="Absolute path to PDF file")
+    parser.add_argument("pdf_path", help="Absolute path to PDF file or URL to download from")
     parser.add_argument(
         "output_format",
         nargs="?",
@@ -694,8 +804,17 @@ def main():
         logging.getLogger().setLevel(logging.DEBUG)
 
     pdf_path = args.pdf_path
+    temp_pdf_path = None
 
-    if not Path(pdf_path).exists():
+    # Handle URL downloads
+    if is_url(pdf_path):
+        try:
+            temp_pdf_path = download_pdf(pdf_path)
+            pdf_path = temp_pdf_path
+        except Exception as e:
+            print(f"Error: {e}")
+            sys.exit(1)
+    elif not Path(pdf_path).exists():
         print(f"Error: PDF file not found: {pdf_path}")
         sys.exit(1)
 
@@ -706,6 +825,9 @@ def main():
     except Exception as e:
         print(f"Error processing PDF: {e}")
         sys.exit(1)
+    finally:
+        if temp_pdf_path:
+            cleanup_temp_file(temp_pdf_path)
 
 
 if __name__ == "__main__":

@@ -1099,5 +1099,207 @@ class TestBackwardCompatibility(unittest.TestCase):
             self.assertIn("ocr_routing.json", error_output)
 
 
+class TestURLHandling(unittest.TestCase):
+    """Unit tests for URL detection and downloading."""
+
+    def test_is_url_http(self):
+        """Test http:// is detected as URL."""
+        self.assertTrue(pdf_ocr_backend.is_url("http://example.com/test.pdf"))
+
+    def test_is_url_https(self):
+        """Test https:// is detected as URL."""
+        self.assertTrue(pdf_ocr_backend.is_url("https://example.com/test.pdf"))
+
+    def test_is_url_local_path(self):
+        """Test local path is not detected as URL."""
+        self.assertFalse(pdf_ocr_backend.is_url("/path/to/file.pdf"))
+
+    def test_is_url_relative_path(self):
+        """Test relative path is not detected as URL."""
+        self.assertFalse(pdf_ocr_backend.is_url("./file.pdf"))
+
+    @patch("pdf_ocr_backend.requests.get")
+    @patch("pdf_ocr_backend.fitz.open")
+    def test_download_pdf_success(self, mock_fitz_open, mock_get):
+        """Test successful PDF download."""
+        mock_response = MagicMock()
+        mock_response.headers = {"Content-Length": "1024"}
+        mock_response.iter_content.return_value = [b"fake pdf content"]
+        mock_response.raise_for_status = MagicMock()
+        mock_get.return_value = mock_response
+
+        mock_doc = MagicMock()
+        mock_doc.page_count = 1
+        mock_fitz_open.return_value = mock_doc
+
+        temp_path = pdf_ocr_backend.download_pdf("https://example.com/test.pdf")
+
+        self.assertTrue(os.path.exists(temp_path))
+        self.assertTrue(temp_path.endswith(".pdf"))
+        mock_get.assert_called_once_with(
+            "https://example.com/test.pdf", stream=True, timeout=60, allow_redirects=True
+        )
+
+        # Cleanup
+        pdf_ocr_backend.cleanup_temp_file(temp_path)
+
+    @patch("pdf_ocr_backend.requests.get")
+    def test_download_pdf_http_error(self, mock_get):
+        """Test download failure on HTTP error."""
+        import requests
+
+        mock_get.side_effect = requests.exceptions.HTTPError("404 Not Found")
+
+        with self.assertRaises(Exception) as cm:
+            pdf_ocr_backend.download_pdf("https://example.com/missing.pdf")
+
+        self.assertIn("Failed to download", str(cm.exception))
+
+    @patch("pdf_ocr_backend.requests.get")
+    def test_download_pdf_connection_error(self, mock_get):
+        """Test download failure on connection error."""
+        import requests
+
+        mock_get.side_effect = requests.exceptions.ConnectionError("Connection refused")
+
+        with self.assertRaises(Exception) as cm:
+            pdf_ocr_backend.download_pdf("https://example.com/test.pdf")
+
+        self.assertIn("Failed to download", str(cm.exception))
+
+    @patch("pdf_ocr_backend.requests.get")
+    def test_download_pdf_content_length_exceeded(self, mock_get):
+        """Test download rejected when Content-Length exceeds limit."""
+        mock_response = MagicMock()
+        mock_response.headers = {"Content-Length": str(100 * 1024 * 1024)}  # 100 MB
+        mock_response.iter_content.return_value = []
+        mock_response.raise_for_status = MagicMock()
+        mock_get.return_value = mock_response
+
+        with self.assertRaises(Exception) as cm:
+            pdf_ocr_backend.download_pdf("https://example.com/huge.pdf")
+
+        self.assertIn("too large", str(cm.exception))
+
+    @patch("pdf_ocr_backend.requests.get")
+    @patch("pdf_ocr_backend.fitz.open")
+    def test_download_pdf_streaming_size_exceeded(self, mock_fitz_open, mock_get):
+        """Test download rejected when streaming exceeds limit."""
+        mock_response = MagicMock()
+        mock_response.headers = {}
+        # Simulate chunks that exceed 50MB
+        mock_response.iter_content.return_value = [b"x" * (1024 * 1024)] * 60
+        mock_response.raise_for_status = MagicMock()
+        mock_get.return_value = mock_response
+
+        with self.assertRaises(Exception) as cm:
+            pdf_ocr_backend.download_pdf("https://example.com/huge.pdf")
+
+        self.assertIn("exceeds maximum", str(cm.exception))
+
+    @patch("pdf_ocr_backend.requests.get")
+    @patch("pdf_ocr_backend.fitz.open")
+    def test_download_pdf_invalid_content(self, mock_fitz_open, mock_get):
+        """Test download rejected when content is not a valid PDF."""
+        mock_response = MagicMock()
+        mock_response.headers = {"Content-Length": "100"}
+        mock_response.iter_content.return_value = [b"not a pdf"]
+        mock_response.raise_for_status = MagicMock()
+        mock_get.return_value = mock_response
+
+        mock_fitz_open.side_effect = Exception("cannot open document")
+
+        with self.assertRaises(Exception) as cm:
+            pdf_ocr_backend.download_pdf("https://example.com/notpdf.txt")
+
+        self.assertIn("not a valid PDF", str(cm.exception))
+
+    @patch("pdf_ocr_backend.requests.get")
+    @patch("pdf_ocr_backend.fitz.open")
+    def test_download_pdf_empty_file(self, mock_fitz_open, mock_get):
+        """Test download rejected when file is empty."""
+        mock_response = MagicMock()
+        mock_response.headers = {"Content-Length": "0"}
+        mock_response.iter_content.return_value = []
+        mock_response.raise_for_status = MagicMock()
+        mock_get.return_value = mock_response
+
+        with self.assertRaises(Exception) as cm:
+            pdf_ocr_backend.download_pdf("https://example.com/empty.pdf")
+
+        self.assertIn("empty", str(cm.exception))
+
+    @patch("pdf_ocr_backend.requests.get")
+    @patch("pdf_ocr_backend.fitz.open")
+    def test_download_pdf_no_pages(self, mock_fitz_open, mock_get):
+        """Test download rejected when PDF has no pages."""
+        mock_response = MagicMock()
+        mock_response.headers = {"Content-Length": "1024"}
+        mock_response.iter_content.return_value = [b"fake pdf content"]
+        mock_response.raise_for_status = MagicMock()
+        mock_get.return_value = mock_response
+
+        mock_doc = MagicMock()
+        mock_doc.page_count = 0
+        mock_fitz_open.return_value = mock_doc
+
+        with self.assertRaises(Exception) as cm:
+            pdf_ocr_backend.download_pdf("https://example.com/empty.pdf")
+
+        self.assertIn("no pages", str(cm.exception).lower())
+
+    def test_cleanup_temp_file_success(self):
+        """Test cleanup removes existing file."""
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+            temp_path = f.name
+
+        self.assertTrue(os.path.exists(temp_path))
+        pdf_ocr_backend.cleanup_temp_file(temp_path)
+        self.assertFalse(os.path.exists(temp_path))
+
+    def test_cleanup_temp_file_nonexistent(self):
+        """Test cleanup handles non-existent file gracefully."""
+        temp_path = "/tmp/nonexistent_cleanup_test.pdf"
+        # Should not raise
+        pdf_ocr_backend.cleanup_temp_file(temp_path)
+
+    @patch("pdf_ocr_backend.download_pdf")
+    @patch("pdf_ocr_backend.route_ocr_request")
+    def test_main_with_url_success(self, mock_route, mock_download):
+        """Test main() with a valid URL downloads and processes PDF."""
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+            temp_path = f.name
+
+        mock_download.return_value = temp_path
+        mock_route.return_value = "OCR result from URL"
+
+        with patch("sys.argv", ["pdf_ocr_backend.py", "https://example.com/test.pdf", "markdown"]):
+            with patch("builtins.print") as mock_print:
+                with patch.dict(os.environ, {"DEEPSEEK_OCR_BASE_URL": "http://test:8080/v1"}):
+                    pdf_ocr_backend.main()
+
+        mock_download.assert_called_once_with("https://example.com/test.pdf")
+        mock_route.assert_called_once_with(temp_path, "markdown", None)
+        calls = mock_print.call_args_list
+        self.assertTrue(any("OCR result from URL" in str(call) for call in calls))
+
+        # Cleanup if file still exists
+        pdf_ocr_backend.cleanup_temp_file(temp_path)
+
+    @patch("pdf_ocr_backend.download_pdf")
+    def test_main_with_url_download_failure(self, mock_download):
+        """Test main() exits with code 1 when URL download fails."""
+        mock_download.side_effect = Exception("Download failed")
+
+        with patch("sys.argv", ["pdf_ocr_backend.py", "https://example.com/bad.pdf", "markdown"]):
+            with patch("builtins.print") as mock_print:
+                with self.assertRaises(SystemExit) as cm:
+                    pdf_ocr_backend.main()
+                self.assertEqual(cm.exception.code, 1)
+
+        calls = mock_print.call_args_list
+        self.assertTrue(any("Download failed" in str(call) for call in calls))
+
+
 if __name__ == "__main__":
     unittest.main()
