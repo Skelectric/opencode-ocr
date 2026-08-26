@@ -1,8 +1,23 @@
 # PDF OCR Tool
 
-An OpenCode tool for processing PDF files using OCR. Converts PDFs to high-quality images, performs OCR on each page, and returns markdown or plain text output. Supports both dedicated OCR models and multimodal vision models.
+An OCR tool for processing PDF files. Converts PDFs to high-quality images, performs OCR on each page, and returns markdown or plain text output. Supports both dedicated OCR models and multimodal vision models. Usable from both **OpenCode** and **pi**.
 
 ## Installation
+
+The `deploy-tool.sh` script deploys to either or both harnesses:
+
+- **OpenCode** tool → `~/.config/opencode/tool/` (`pdf-ocr.ts` + backend)
+- **pi** extension → `~/.pi/agent/extensions/pdf-ocr/` + `~/.config/pi/tool/` (backend)
+
+Each harness owns its own `.env` and `ocr_routing.json`; nothing is shared at runtime. Use `--target` to deploy to only one harness (useful if you don't have the other installed):
+
+```bash
+./deploy-tool.sh --target opencode   # OpenCode only
+./deploy-tool.sh --target pi         # pi only
+./deploy-tool.sh --target both       # both (default)
+```
+
+### OpenCode
 
 This tool should be installed globally at `~/.config/opencode/tool/`.
 
@@ -11,7 +26,7 @@ This tool should be installed globally at `~/.config/opencode/tool/`.
 Use the provided deployment script for one-command installation and updates:
 
 ```bash
-# Initial installation
+# Initial installation (OpenCode + pi)
 ./deploy-tool.sh
 
 # Update after making changes to the repository
@@ -20,11 +35,19 @@ Use the provided deployment script for one-command installation and updates:
 # Force reinstallation (even if already installed)
 ./deploy-tool.sh --force
 
+# Deploy to only one harness (skip the other)
+./deploy-tool.sh --target opencode
+./deploy-tool.sh --target pi
+
 # Specify custom repository path
 ./deploy-tool.sh --repo /path/to/opencode-ocr
 ```
 
-The script automatically detects if the tool is already installed and performs an update instead.
+The script automatically detects if the tool is already installed and performs an update instead. After deploying the pi extension, run `/reload` in pi to load the `pdf_ocr` tool.
+
+### pi
+
+`./deploy-tool.sh --target pi` deploys only the pi extension and its backend (use `--target both` or omit `--target` to also deploy to OpenCode). The pi backend lives at `~/.config/pi/tool/` (override with the `PDF_OCR_TOOL_DIR` env var), and the extension at `~/.pi/agent/extensions/pdf-ocr/`. After deploying, run `/reload` in pi. See `pdf-ocr/pi/README.md` for pi-specific details.
 
 ### Manual Installation
 
